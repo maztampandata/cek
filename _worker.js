@@ -153,8 +153,7 @@ async function generateSubscription(params) {
      uri.hash = `${prx.org} WS TLS [${serviceName}]`;
      return uri.toString();
      })()
-   }
-              
+     }
 
 
 
@@ -679,16 +678,12 @@ function makeReadableWebSocketStream(webSocketServer, earlyDataHeader, log) {
 async function checkPrxHealth(prxIP, prxPort) {
   try {
     const req = await fetch(`${PRX_HEALTH_CHECK_API}?ip=${prxIP}:${prxPort}`);
-    if (!req.ok) {
-      return { error: 'health_api_error', status: req.status };
-    }
-    const json = await req.json();
-    // json contoh: { "proxy":"138.2.89.64", "port":32962, ..., "delay":1088, ... }
-    return json;
+    return await req.json();
   } catch (err) {
     return { error: 'fetch_failed', message: err.message };
   }
 }
+
 
 
 function serveUI() {
@@ -870,286 +865,228 @@ function serveUI() {
 
   <div class="notification" id="notification"><span id="notification-text">Berhasil disalin!</span></div>
 
-  <script>
-    // Elements
-    const uuidValue = document.getElementById('uuid-value');
-    const proxyValue = document.getElementById('proxy-value');
-    const configBox = document.getElementById('config-box');
-    const configProgress = document.getElementById('config-progress');
-    const pingValue = document.getElementById('ping-value');
-    const pingStatus = document.getElementById('ping-status');
-    const lastCheck = document.getElementById('last-check');
-    const uptimeValue = document.getElementById('uptime-value');
-    const statusText = document.getElementById('status-text');
-    const activeProxy = document.getElementById('active-proxy');
-    const proxyCount = document.getElementById('proxy-count');
-    const proxyList = document.getElementById('proxy-list');
-    const notification = document.getElementById('notification');
-    const notificationText = document.getElementById('notification-text');
+<script>
+  // Elements
+  const uuidValue = document.getElementById('uuid-value');
+  const proxyValue = document.getElementById('proxy-value');
+  const configBox = document.getElementById('config-box');
+  const configProgress = document.getElementById('config-progress');
+  const pingValue = document.getElementById('ping-value');
+  const pingStatus = document.getElementById('ping-status');
+  const lastCheck = document.getElementById('last-check');
+  const uptimeValue = document.getElementById('uptime-value');
+  const statusText = document.getElementById('status-text');
+  const activeProxy = document.getElementById('active-proxy');
+  const proxyCount = document.getElementById('proxy-count');
+  const proxyList = document.getElementById('proxy-list');
+  const notification = document.getElementById('notification');
+  const notificationText = document.getElementById('notification-text');
 
-    // Buttons
-    const refreshBtn = document.getElementById('refresh-btn');
-    const copyBtn = document.getElementById('copy-btn');
-    const generateVlessBtn = document.getElementById('generate-vless-btn'); // id kept for compatibility
-    const pingBtn = document.getElementById('ping-btn');
-    const autoPingBtn = document.getElementById('auto-ping-btn');
-    const rotateProxyBtn = document.getElementById('rotate-proxy-btn');
-    const refreshProxiesBtn = document.getElementById('refresh-proxies-btn');
+  // Buttons
+  const refreshBtn = document.getElementById('refresh-btn');
+  const copyBtn = document.getElementById('copy-btn');
+  const generateVlessBtn = document.getElementById('generate-vless-btn');
+  const pingBtn = document.getElementById('ping-btn');
+  const autoPingBtn = document.getElementById('auto-ping-btn');
+  const rotateProxyBtn = document.getElementById('rotate-proxy-btn');
+  const refreshProxiesBtn = document.getElementById('refresh-proxies-btn');
 
-    // State
-    let autoPingInterval = null;
-    let startTime = Date.now();
-    let currentConfig = null;
+  // State
+  let autoPingInterval = null;
+  let startTime = Date.now();
+  let currentConfig = null;
 
-    function formatTime(timestamp) { return new Date(timestamp).toLocaleTimeString(); }
-    function formatDuration(ms) {
-      const seconds = Math.floor(ms/1000), minutes = Math.floor(seconds/60), hours = Math.floor(minutes/60);
-      if (hours>0) return \`\${hours}h \${minutes%60}m\`;
-      if (minutes>0) return \`\${minutes}m \${seconds%60}s\`;
-      return \`\${seconds}s\`;
-    }
+  function formatDuration(ms) {
+    const sec = Math.floor(ms / 1000);
+    const min = Math.floor(sec / 60);
+    const hr = Math.floor(min / 60);
+    if (hr > 0) return '${hr}h ${min % 60}m';
+    if (min > 0) return '${min}m ${sec % 60}s';
+    return '${sec}s';
+  }
+  function updateUptime() {
+    uptimeValue.textContent = formatDuration(Date.now() - startTime);
+  }
+  function showNotification(message, type='success') {
+    notificationText.textContent = message;
+    notification.className = 'notification show';
+    notification.style.background = (type === 'error') ? 'var(--danger)' : 'var(--success)';
+    setTimeout(()=> notification.classList.remove('show'), 3000);
+  }
 
-    function showNotification(message, type='success') {
-      notificationText.textContent = message;
-      notification.className = 'notification show';
-      notification.style.background = (type==='error') ? 'var(--danger)' : 'var(--success)';
-      setTimeout(()=> notification.classList.remove('show'), 3000);
-    }
+  // Load config dari backend
+  async function loadConfig() {
+    try {
+      configProgress.style.width = '30%';
+      const domain = location.hostname || '';
+      const res = await fetch('/sub?domain=' + encodeURIComponent(domain));
+      const text = await res.text();
+      configProgress.style.width = '70%';
 
-    function updateUptime(){ uptimeValue.textContent = formatDuration(Date.now() - startTime); }
+      let data;
+      try { data = JSON.parse(text); } catch(e) { data = { error: text }; }
+      configProgress.style.width = '90%';
 
-    // Load konfigurasi (uses /sub endpoint)
-    async function loadConfig() {
-      try {
-        configProgress.style.width = '30%';
-        const domain = location.hostname || '';
-        const res = await fetch('/sub?domain=' + encodeURIComponent(domain));
-        const text = await res.text();
-        configProgress.style.width = '70%';
-        let data;
-        try { data = JSON.parse(text); } catch(e) { data = { error: text }; }
-        configProgress.style.width = '90%';
+      if (data && !data.error) {
+        uuidValue.textContent = data.uuid || 'n/a';
+        proxyValue.textContent = '${data.ip}:${data.port} (${data.org||''})';
+        activeProxy.textContent = proxyValue.textContent;
 
-        if (data && !data.error) {
-          // UUID from backend
-          uuidValue.textContent = data.uuid || 'n/a';
+        configBox.textContent = data.config_vls || JSON.stringify(data, null, 2);
+        currentConfig = configBox.textContent;
 
-          // Proxy active
-          proxyValue.textContent = (data.ip && data.port) ? (data.ip + ':' + data.port + ' (' + (data.org||'') + ')') : 'n/a';
-          activeProxy.textContent = proxyValue.textContent;
+        // pool count dari SG + ID
+        const [sgRes, idRes] = await Promise.all([fetch('/SG.txt'), fetch('/ID.txt')]);
+        let sgList = [], idList = [];
+        try { sgList = await sgRes.json(); } catch(e){}
+        try { idList = await idRes.json(); } catch(e){}
+        proxyCount.textContent = (sgList.length + idList.length) + ' proxies available';
 
-          // Config box shows primary ${atob(flash)} string (config_vls/config_vless naming may vary in backend)
-          const vls = data.config_vls || data.config_vless || data.config_vless || data.config_vls || data.config_vls;
-          configBox.textContent = vls || data.config_vls || JSON.stringify(data, null, 2);
-          currentConfig = configBox.textContent;
+        // tampilkan list proxy
+        proxyList.innerHTML = '';
+        [...sgList, ...idList].forEach(p => {
+          const div = document.createElement('div');
+          div.className = 'proxy-item proxy-inactive';
+          div.innerHTML = '<span>${p.prxIP}:${p.prxPort} - ${p.org||p.country}</span><span class="proxy-status">Inactive</span>';
+          if (p.prxIP === data.ip && String(p.prxPort) === String(data.port)) {
+            div.classList.remove('proxy-inactive');
+            div.classList.add('proxy-active');
+            div.querySelector('.proxy-status').textContent = 'Active';
+          }
+          proxyList.appendChild(div);
+        });
 
-          // Pool count from SG + ID endpoints
-          const [sgRes, idRes] = await Promise.all([fetch('/SG.txt'), fetch('/ID.txt')]);
-          let sgList = [], idList = [];
-          try { sgList = await sgRes.json(); } catch(e){ sgList = []; }
-          try { idList = await idRes.json(); } catch(e){ idList = []; }
-          const pool = [...(sgList||[]), ...(idList||[])];
-          proxyCount.textContent = pool.length + ' proxies available';
-
-          // Build proxy list UI
-          proxyList.innerHTML = '';
-          pool.forEach(p => {
-            const proxyItem = document.createElement('div');
-            proxyItem.className = 'proxy-item proxy-inactive';
-            proxyItem.innerHTML = \`<span>\${p.prxIP}:\${p.prxPort} - \${p.org || p.country}</span><span class="proxy-status">Inactive</span>\`;
-            if (p.prxIP === data.ip && String(p.prxPort) === String(data.port)) {
-              proxyItem.classList.remove('proxy-inactive');
-              proxyItem.classList.add('proxy-active');
-              proxyItem.querySelector('.proxy-status').textContent = 'Active';
-            }
-            proxyList.appendChild(proxyItem);
-          });
-
-          // Ping to active proxy (attempt HEAD to https://<ip> with timeout)
-          await testPing({ ip: data.ip, port: data.port });
-
-        } else {
-          configBox.textContent = 'No config (error)';
-          showNotification('No config returned', 'error');
-        }
-
-        setTimeout(()=> { configProgress.style.width = '0%'; }, 1000);
-      } catch (error) {
-        console.error('Error loading config:', error);
-        configBox.textContent = 'Error loading configuration';
-        showNotification('Error loading configuration', 'error');
+        // test ping
+        await testPing({ ip: data.ip, port: data.port });
+      } else {
+        configBox.textContent = 'No config (error)';
+        showNotification('No config returned', 'error');
       }
+
+      setTimeout(()=> configProgress.style.width = '0%', 1000);
+    } catch (err) {
+      console.error(err);
+      configBox.textContent = 'Error loading configuration';
+      showNotification('Error loading configuration', 'error');
     }
+  }
 
-    // Generate ${atob(flash)} config (uses same endpoint but keeps label)
-    async function generateVlessConfig() {
-      try {
-        generateVlessBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
-        const domain = location.hostname || '';
-        const res = await fetch('/sub?domain=' + encodeURIComponent(domain));
-        const text = await res.text();
-        let data;
-        try { data = JSON.parse(text); } catch(e) { data = { error: text }; }
+  // Ping pakai /health
+  async function testPing(proxy) {
+    try {
+      pingValue.textContent = '...';
+      pingValue.className = 'ping-value';
+      pingStatus.textContent = 'Testing...';
 
-        if (data && !data.error) {
-          const vlessStr = data.config_vls || data.config_vless || data.config_vls;
-          configBox.textContent = vlessStr || JSON.stringify(data, null, 2);
-          currentConfig = configBox.textContent;
-          showNotification('${atob(flash)} config generated successfully!');
-        } else {
-          showNotification('Error generating config', 'error');
-        }
-        generateVlessBtn.innerHTML = '<i class="fas fa-bolt"></i> Generate ${atob(flash)}';
-      } catch (error) {
-        console.error('Error generating ${atob(flash)} config:', error);
-        showNotification('Error generating ${atob(flash)} config', 'error');
-        generateVlessBtn.innerHTML = '<i class="fas fa-bolt"></i> Generate ${atob(flash)}';
+      if (!proxy || !proxy.ip) {
+        pingValue.textContent = 'No IP';
+        pingValue.className = 'ping-value ping-bad';
+        pingStatus.textContent = 'No IP';
+        return null;
       }
-    }
 
-    // Ping to given ip
-    // ===== UI: testPing menggunakan /health endpoint (mengambil field delay) =====
-async function testPing(proxy) {
-  try {
-    pingValue.textContent = '...';
-    pingValue.className = 'ping-value';
-    pingStatus.textContent = 'Testing...';
+      const ipPort = proxy.ip + ':' + (proxy.port || '443');
+      const res = await fetch('/health?ip=${encodeURIComponent(ipPort)}');
+      const data = await res.json();
 
-    if (!proxy || !proxy.ip) {
-      pingValue.textContent = 'No IP';
+      let latency = (data && typeof data.delay !== 'undefined') ? Number(data.delay) : null;
+      if (latency !== null && !isNaN(latency)) {
+        pingValue.textContent = latency;
+        if (latency < 100) { pingValue.className = 'ping-value ping-good'; pingStatus.textContent = 'ms (Excellent)'; }
+        else if (latency < 300) { pingValue.className = 'ping-value ping-medium'; pingStatus.textContent = 'ms (Good)'; }
+        else { pingValue.className = 'ping-value ping-bad'; pingStatus.textContent = 'ms (Slow)'; }
+      } else {
+        pingValue.textContent = 'N/A';
+        pingValue.className = 'ping-value ping-bad';
+        pingStatus.textContent = 'No delay';
+      }
+
+      lastCheck.textContent = new Date().toLocaleTimeString();
+      statusText.textContent = 'Active';
+      return latency;
+    } catch (err) {
+      console.error('Error testing ping:', err);
+      pingValue.textContent = 'Error';
       pingValue.className = 'ping-value ping-bad';
-      pingStatus.textContent = 'No IP';
+      pingStatus.textContent = 'Connection failed';
+      statusText.textContent = 'Error';
       return null;
     }
-
-    // Panggil backend /health (backend akan memanggil PRX_HEALTH_CHECK_API)
-    const healthUrl = /health?ip=${encodeURIComponent(proxy.ip)}&port=${encodeURIComponent(proxy.port||'')}
-    const start = Date.now();
-    let latency = null;
-
-    try {
-      const res = await fetch(healthUrl, { method: 'GET' });
-      const data = await res.json();
-      // ambil field 'delay' jika ada (nilai ms)
-      if (data && typeof data.delay !== 'undefined') {
-        latency = Number(data.delay);
-      } else if (data && typeof data.ping !== 'undefined') {
-        // fallback jika API pakai field 'ping'
-        latency = Number(data.ping);
-      } else {
-        // fallback kasar: gunakan elapsed time request sebagai estimate
-        latency = Date.now() - start;
-      }
-    } catch (err) {
-      console.warn('Health API failed', err);
-      latency = Date.now() - start;
-    }
-
-    // tampilkan hasil
-    pingValue.textContent = (isNaN(latency) ? 'N/A' : latency);
-    if (!isNaN(latency)) {
-      if (latency < 100) {
-        pingValue.className = 'ping-value ping-good';
-        pingStatus.textContent = 'ms (Excellent)';
-      } else if (latency < 300) {
-        pingValue.className = 'ping-value ping-medium';
-        pingStatus.textContent = 'ms (Good)';
-      } else {
-        pingValue.className = 'ping-value ping-bad';
-        pingStatus.textContent = 'ms (Slow)';
-      }
-    } else {
-      pingValue.className = 'ping-value ping-bad';
-      pingStatus.textContent = 'N/A';
-    }
-
-    lastCheck.textContent = new Date().toLocaleTimeString();
-    statusText.textContent = 'Active';
-    return latency;
-  } catch (error) {
-    console.error('Error testing ping:', error);
-    pingValue.textContent = 'Error';
-    pingValue.className = 'ping-value ping-bad';
-    pingStatus.textContent = 'Connection failed';
-    statusText.textContent = 'Error';
-    return null;
   }
-}
 
-    
-    
-    
-    
-
-    function toggleAutoPing() {
-      if (autoPingInterval) {
-        clearInterval(autoPingInterval);
-        autoPingInterval = null;
-        autoPingBtn.innerHTML = '<i class="fas fa-sync"></i> Auto Ping';
-        autoPingBtn.classList.remove('btn-danger');
-        showNotification('Auto ping stopped');
-      } else {
-        // use currently displayed active proxy IP if available
-        const ip = (activeProxy.textContent || '').split(':')[0];
-        testPing(ip);
-        autoPingInterval = setInterval(()=> testPing(ip), 5000);
-        autoPingBtn.innerHTML = '<i class="fas fa-stop"></i> Stop Auto Ping';
-        autoPingBtn.classList.add('btn-danger');
-        showNotification('Auto ping started');
-      }
+  // Auto ping
+  function toggleAutoPing() {
+    if (autoPingInterval) {
+      clearInterval(autoPingInterval);
+      autoPingInterval = null;
+      autoPingBtn.innerHTML = '<i class="fas fa-sync"></i> Auto Ping';
+      autoPingBtn.classList.remove('btn-danger');
+      showNotification('Auto ping stopped');
+    } else {
+      const parts = (activeProxy.textContent || '').split(':');
+      const ip = parts[0];
+      const port = parts[1] ? parts[1].split(' ')[0] : '443'; // buang "(ORG)" setelah port
+      testPing({ ip, port });
+      autoPingInterval = setInterval(() => testPing({ ip, port }), 5000);
+      autoPingBtn.innerHTML = '<i class="fas fa-stop"></i> Stop Auto Ping';
+      autoPingBtn.classList.add('btn-danger');
+      showNotification('Auto ping started');
     }
+  }
 
-    async function copyConfig() {
-      try {
-        if (!currentConfig) { showNotification('No configuration to copy', 'error'); return; }
-        await navigator.clipboard.writeText(currentConfig);
-        showNotification('Configuration copied to clipboard!');
-      } catch (error) {
-        console.error('Error copying config:', error);
-        showNotification('Error copying configuration', 'error');
-      }
+  // Copy config
+  async function copyConfig() {
+    if (!currentConfig) return showNotification('No configuration to copy', 'error');
+    try {
+      await navigator.clipboard.writeText(currentConfig);
+      showNotification('Configuration copied to clipboard!');
+    } catch (err) {
+      showNotification('Error copying configuration', 'error');
     }
+  }
 
-    async function rotateProxy() {
-      try {
-        rotateProxyBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Rotating...';
-        await loadConfig();
-        showNotification('Proxy rotated successfully!');
-        rotateProxyBtn.innerHTML = '<i class="fas fa-random"></i> Rotate Proxy';
-      } catch (error) {
-        console.error('Error rotating proxy:', error);
-        showNotification('Error rotating proxy', 'error');
-        rotateProxyBtn.innerHTML = '<i class="fas fa-random"></i> Rotate Proxy';
-      }
-    }
+  // Rotate proxy
+  async function rotateProxy() {
+    rotateProxyBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Rotating...';
+    await loadConfig();
+    showNotification('Proxy rotated successfully!');
+    rotateProxyBtn.innerHTML = '<i class="fas fa-random"></i> Rotate Proxy';
+  }
 
-    async function refreshProxies() {
-      try {
-        refreshProxiesBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
-        await loadConfig();
-        showNotification('Proxy list refreshed!');
-        refreshProxiesBtn.innerHTML = '<i class="fas fa-redo"></i> Refresh Proxies';
-      } catch (error) {
-        console.error('Error refreshing proxies:', error);
-        showNotification('Error refreshing proxies', 'error');
-        refreshProxiesBtn.innerHTML = '<i class="fas fa-redo"></i> Refresh Proxies';
-      }
-    }
+  // Refresh proxies
+  async function refreshProxies() {
+    refreshProxiesBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
+    await loadConfig();
+    showNotification('Proxy list refreshed!');
+    refreshProxiesBtn.innerHTML = '<i class="fas fa-redo"></i> Refresh Proxies';
+  }
 
-    // Event listeners
-    refreshBtn.addEventListener('click', loadConfig);
-    copyBtn.addEventListener('click', copyConfig);
-    generateVlessBtn.addEventListener('click', generateVlessConfig);
-    pingBtn.addEventListener('click', ()=> testPing((activeProxy.textContent||'').split(':')[0]));
-    autoPingBtn.addEventListener('click', toggleAutoPing);
-    rotateProxyBtn.addEventListener('click', rotateProxy);
-    refreshProxiesBtn.addEventListener('click', refreshProxies);
+  // Event listeners
+  refreshBtn.addEventListener('click', loadConfig);
+  copyBtn.addEventListener('click', copyConfig);
+  generateVlessBtn.addEventListener('click', loadConfig);
+  pingBtn.addEventListener('click', () => {
+    const parts = (activeProxy.textContent || '').split(':');
+    const ip = parts[0];
+    const port = parts[1] ? parts[1].split(' ')[0] : '443';
+    testPing({ ip, port });
+  });
+  autoPingBtn.addEventListener('click', toggleAutoPing);
+  rotateProxyBtn.addEventListener('click', rotateProxy);
+  refreshProxiesBtn.addEventListener('click', refreshProxies);
 
-    // Initial load
-    loadConfig();
-    setTimeout(()=> testPing((activeProxy.textContent||'').split(':')[0]), 1000);
-    setInterval(updateUptime, 1000);
-  </script>
+  // Initial load
+  loadConfig();
+  setTimeout(() => {
+    const parts = (activeProxy.textContent || '').split(':');
+    const ip = parts[0];
+    const port = parts[1] ? parts[1].split(' ')[0] : '443';
+    testPing({ ip, port });
+  }, 1000);
+
+  setInterval(updateUptime, 1000);
+</script>
+
 </body>
 </html>
 `;
@@ -1215,21 +1152,28 @@ export default {
       }
       
       // route: /health?ip=1.2.3.4&port=443
+// === Route: /health?ip=IP:PORT ===
 if (pathname === "/health") {
-  const ip = url.searchParams.get("ip") || "";
-  const port = url.searchParams.get("port") || "";
-  if (!ip) {
+  const ipPort = url.searchParams.get("ip"); // contoh: "138.2.89.64:32962"
+  if (!ipPort) {
     return new Response(JSON.stringify({ error: "missing_ip" }), {
       status: 400,
-      headers: { "Content-Type": "application/json", ...CORS_HEADER_OPTIONS },
+      headers: { "Content-Type": "application/json" },
     });
   }
-  const result = await checkPrxHealth(ip, port);
+
+  // pisahkan jadi ip dan port
+  const [ip, port] = ipPort.split(":");
+
+  const result = await checkPrxHealth(ip, port || "443");
   return new Response(JSON.stringify(result, null, 2), {
     status: 200,
-    headers: { "Content-Type": "application/json", ...CORS_HEADER_OPTIONS },
+    headers: { "Content-Type": "application/json" },
   });
 }
+
+
+
 
 
       // Expose SG/ID lists for UI
