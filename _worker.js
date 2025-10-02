@@ -170,17 +170,6 @@ async function generateSubscription(params, request) {
 
 
 
-  const result = {
-    uuid,
-    ip: prx.prxIP,
-    port: prx.prxPort,
-    org: prx.org,
-    config_vls
-    
-  };
-
-  return JSON.stringify(result, null, 2);
-}
 
 /* =======================
    Reverse Web / Basic Proxy
