@@ -952,7 +952,7 @@ function serveUI() {
         [...sgList, ...idList].forEach(p => {
           const div = document.createElement('div');
           div.className = 'proxy-item proxy-inactive';
-          div.innerHTML = '<span>${p.prxIP}:${p.prxPort} - ${p.org||p.country}</span><span class="proxy-status">Inactive</span>';
+          div.innerHTML = '<span>\`\${p.prxIP}:\${p.prxPort} - \${p.org||p.country\`}</span><span class="proxy-status">Inactive</span>';
           if (p.prxIP === data.ip && String(p.prxPort) === String(data.port)) {
             div.classList.remove('proxy-inactive');
             div.classList.add('proxy-active');
