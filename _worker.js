@@ -135,7 +135,7 @@ async function generateSubscription(params) {
   const uuid = crypto.randomUUID();
  
    
-   const config_vls = {})()
+   const config_vls = {
      [atob(flash)]: (() => {
      const uri = new URL(`${atob(flash)}://${fillerDomain}`);
      uri.searchParams.set("encryption", "none");
@@ -150,6 +150,7 @@ async function generateSubscription(params) {
      uri.hash = `${prx.org} WS TLS [${serviceName}]`;
      return uri.toString();
      })()
+   }
               
 
 
