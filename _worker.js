@@ -770,17 +770,17 @@ function serveUI() {
 
         <div class="info-grid">
           <div class="info-item">
-            <span class="info-label"><i class="fas fa-fingerprint"></i> UUID :</span>
+            <span class="info-label"><i class="fas fa-fingerprint"></i> UUID:</span>
             <span class="info-value" id="uuid-value"><div class="loading"></div></span>
           </div>
 
           <div class="info-item">
-            <span class="info-label"><i class="fas fa-server"></i> SERVER :</span>
+            <span class="info-label"><i class="fas fa-server"></i> Server:</span>
             <span class="info-value" id="proxy-value"><div class="loading"></div></span>
           </div>
 
           <div class="info-item">
-            <span class="info-label"><i class="fas fa-circle"></i> STATUS :</span>
+            <span class="info-label"><i class="fas fa-circle"></i> Status:</span>
             <span class="info-value">
               <span class="status-indicator status-active"></span>
               <span id="status-text">Active</span>
@@ -806,7 +806,7 @@ function serveUI() {
 
         <div class="info-grid">
           <div class="info-item">
-            <span class="info-label"><i class="fas fa-signal"></i> Ping  :</span>
+            <span class="info-label"><i class="fas fa-signal"></i> Ping Saat Ini:</span>
             <div class="ping-container">
               <span class="ping-value" id="ping-value">--</span>
               <span id="ping-status">ms</span>
@@ -814,12 +814,12 @@ function serveUI() {
           </div>
 
           <div class="info-item">
-            <span class="info-label"><i class="fas fa-clock"></i> Terakhir Diperiksa :</span>
+            <span class="info-label"><i class="fas fa-clock"></i> Terakhir Diperiksa:</span>
             <span class="info-value" id="last-check">Never</span>
           </div>
 
           <div class="info-item">
-            <span class="info-label"><i class="fas fa-stopwatch"></i> Aktif Selama :</span>
+            <span class="info-label"><i class="fas fa-stopwatch"></i> Uptime:</span>
             <span class="info-value" id="uptime-value">Calculating...</span>
           </div>
         </div>
@@ -838,12 +838,12 @@ function serveUI() {
 
         <div class="info-grid">
           <div class="info-item">
-            <span class="info-label"><i class="fas fa-shield-alt"></i> Proxy Aktif :</span>
+            <span class="info-label"><i class="fas fa-shield-alt"></i> Proxy Aktif:</span>
             <span class="info-value" id="active-proxy"><div class="loading"></div></span>
           </div>
 
           <div class="info-item">
-            <span class="info-label"><i class="fas fa-database"></i> Pool Proxy :</span>
+            <span class="info-label"><i class="fas fa-database"></i> Pool Proxy:</span>
             <span class="info-value" id="proxy-count"><div class="loading"></div></span>
           </div>
         </div>
