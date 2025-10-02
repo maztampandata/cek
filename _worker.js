@@ -897,13 +897,18 @@ function serveUI() {
   let currentConfig = null;
 
   function formatDuration(ms) {
-    const sec = Math.floor(ms / 1000);
-    const min = Math.floor(sec / 60);
-    const hr = Math.floor(min / 60);
-    if (hr > 0) return ${hr}h ${min % 60}m;
-    if (min > 0) return ${min}m ${sec % 60}s;
-    return ${sec}s;
-  }
+            const seconds = Math.floor(ms / 1000);
+            const minutes = Math.floor(seconds / 60);
+            const hours = Math.floor(minutes / 60);
+            
+            if (hours > 0) {
+                return \`\${hours}h \${minutes % 60}m\`;
+            } else if (minutes > 0) {
+                return \`\${minutes}m \${seconds % 60}s\`;
+            } else {
+                return \`\${seconds}s\`;
+            }
+        }
   function updateUptime() {
     uptimeValue.textContent = formatDuration(Date.now() - startTime);
   }
