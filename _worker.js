@@ -10,6 +10,9 @@ const APP_DOMAIN = `${serviceName}.${rootDomain}`;
 const PRX_HEALTH_CHECK_API = "https://id1.foolvpn.me/api/v1/check";
 
 // ENCODE BASE64 VLS BIAR GA 1101//
+const horse = "dHJvamFu";
+const v2 = "djJyYXk=";
+const neko = "Y2xhc2g=";
 const flash = "dmxlc3M=";
 const judul= "VkxFU1M=";
 
