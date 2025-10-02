@@ -5,7 +5,7 @@ import { connect } from "cloudflare:sockets";
    CONFIG
    ======================= */
 
-const serviceName = "@last_masterX";
+const serviceName = "cosmos";
 
 const PRX_HEALTH_CHECK_API = "https://id1.foolvpn.me/api/v1/check";
 
@@ -124,36 +124,49 @@ function safeCloseWebSocket(socket) {
 /* =======================
    PROXY / SUB GENERATOR (ROTATE ONE RANDOM CONFIG from SG+ID with TLS & NTLS)
    ======================= */
-async function generateSubscription(params) {
-  const fillerDomain = params.domain || "bug.com";
-  const fillerHost = request.headers.get("Host")
+async function generateSubscription(params, request) {
+  // domain untuk SNI dari query param
+  const domainParam = params.domain || "bug.com";
+
+  // host filler otomatis dari request host
+  const fillerHost = (request && request.headers.get("Host")) ;
+
   // Ambil list SG + ID
   const sgList = await getPrxListByCountry("SG");
   const idList = await getPrxListByCountry("ID");
   const prxList = [...sgList, ...idList];
   if (!prxList.length) return JSON.stringify({ error: "No proxy available" });
 
-  // Ambil satu proxy random
+  // Ambil proxy random
   const prx = prxList[Math.floor(Math.random() * prxList.length)];
   const uuid = crypto.randomUUID();
- 
-   
-   const config_vls = {
-     [atob(flash)]: (() => {
-     const uri = new URL(`${atob(flash)}://${fillerDomain}`);
-     uri.searchParams.set("encryption", "none");
-     uri.searchParams.set("type", "ws");
-     uri.searchParams.set("host", fillerHost);
-     uri.protocol = atob(flash);
-     uri.port = "443";
-     uri.username = uuid;
-     uri.searchParams.set("security", "tls");
-     uri.searchParams.set("sni", fillerHost);
-     uri.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
-     uri.hash = `${prx.org} WS TLS [${serviceName}]`;
-     return uri.toString();
-     })()
-     }
+
+  const config_vls = {
+    [atob(flash)]: (() => {
+      const uri = new URL(`${atob(flash)}://${domainParam}`);
+      uri.searchParams.set("encryption", "none");
+      uri.searchParams.set("type", "ws");
+      uri.searchParams.set("host", fillerHost);   // ✅ Host WS pakai host worker
+      uri.protocol = atob(flash);
+      uri.port = "443";
+      uri.username = uuid;
+      uri.searchParams.set("security", "tls");
+      uri.searchParams.set("sni", domainParam);  // ✅ SNI pakai domain param
+      uri.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
+      uri.hash = `${prx.org} WS TLS [${serviceName}]`;
+      return uri.toString();
+    })()
+  };
+
+  return JSON.stringify({
+    uuid,
+    ip: prx.prxIP,
+    port: prx.prxPort,
+    org: prx.org,
+    config_vls
+  }, null, 2);
+}
+
 
 
 
@@ -1202,13 +1215,14 @@ if (pathname === "/health") {
 
       // /sub -> single rotated config from SG+ID (accept ?domain=...)
       if (pathname.startsWith("/sub")) {
-        const params = Object.fromEntries(url.searchParams.entries());
-        const out = await generateSubscription(params);
-        return new Response(out, {
-          status: 200,
-          headers: { "Content-Type": "application/json; charset=utf-8", ...CORS_HEADER_OPTIONS },
-        });
-      }
+  const params = Object.fromEntries(url.searchParams.entries());
+  const out = await generateSubscription(params, request);  // ✅ kirim request
+  return new Response(out, {
+    status: 200,
+    headers: { "Content-Type": "application/json; charset=utf-8", ...CORS_HEADER_OPTIONS },
+  });
+}
+
 
       // /ping used by UI
       if (pathname === "/ping") {
