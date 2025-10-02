@@ -900,9 +900,9 @@ function serveUI() {
     const sec = Math.floor(ms / 1000);
     const min = Math.floor(sec / 60);
     const hr = Math.floor(min / 60);
-    if (hr > 0) return '${hr}h ${min % 60}m';
-    if (min > 0) return '${min}m ${sec % 60}s';
-    return '${sec}s';
+    if (hr > 0) return ${hr}h ${min % 60}m;
+    if (min > 0) return ${min}m ${sec % 60}s;
+    return ${sec}s;
   }
   function updateUptime() {
     uptimeValue.textContent = formatDuration(Date.now() - startTime);
@@ -929,7 +929,7 @@ function serveUI() {
 
       if (data && !data.error) {
         uuidValue.textContent = data.uuid || 'n/a';
-        proxyValue.textContent = '${data.ip}:${data.port} (${data.org||''})';
+        proxyValue.textContent = ${data.ip}:${data.port} (${data.org||''});
         activeProxy.textContent = proxyValue.textContent;
 
         configBox.textContent = data.config_vls || JSON.stringify(data, null, 2);
