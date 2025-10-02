@@ -1213,18 +1213,88 @@ async function servePrxList(country) {
   });
 }
 
-/* =======================
-   MAIN WORKER HANDLER
-   ======================= */
-      // Default: simple reverse proxy
-      const targetReversePrx = (env && env.REVERSE_PRX_TARGET) || "example.com";
-      return await reverseWeb(request, targetReversePrx);
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    const pathname = url.pathname;
 
-    } catch (err) {
-      return new Response(`An error occurred: ${err.toString()}`, {
-        status: 500,
-        headers: { ...CORS_HEADER_OPTIONS },
-      });
+    // === Endpoint /sub ===
+    if (pathname.startsWith("/sub")) {
+      try {
+        const params = Object.fromEntries(url.searchParams.entries());
+        const out = await generateSubscription(params, request);
+        return new Response(out, {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({
+          error: true,
+          message: "Generate config failed: " + err.message
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
     }
-  },
+
+    // === Endpoint /health ===
+    if (pathname.startsWith("/health")) {
+      try {
+        const ipPort = url.searchParams.get("ip");
+        if (!ipPort) throw new Error("missing ip param");
+        const [ip, port] = ipPort.split(":");
+        const result = await checkPrxHealth(ip, port || "443");
+        return new Response(JSON.stringify(result, null, 2), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({
+          error: true,
+          message: "Health check failed: " + err.message
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+    }
+
+    // === Endpoint /proxy (reverse proxy) ===
+    if (pathname.startsWith("/proxy")) {
+      const target = url.searchParams.get("target"); 
+      if (!target) {
+        return new Response(JSON.stringify({ error: true, message: "target required" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      try {
+        const upstream = await fetch(target, request);
+        if (!upstream.ok) {
+          return new Response(JSON.stringify({
+            error: true,
+            status: upstream.status,
+            message: "Upstream returned error " + upstream.status
+          }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        return upstream; // sukses → teruskan hasil upstream
+      } catch (err) {
+        return new Response(JSON.stringify({
+          error: true,
+          status: "fail",
+          message: "Proxy failed: " + err.message
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+    }
+
+    // === Default: serve UI ===
+    return serveUI();
+  }
 };
