@@ -921,60 +921,69 @@ function serveUI() {
 
   // Load config dari backend
   async function loadConfig() {
-    try {
-      configProgress.style.width = '30%';
-      const domain = location.hostname || '';
-      const res = await fetch('/sub?domain=' + encodeURIComponent(domain));
-      const text = await res.text();
-      configProgress.style.width = '70%';
+  try {
+    configProgress.style.width = '30%';
+    const domain = location.hostname || '';
+    const res = await fetch('/sub?domain=' + encodeURIComponent(domain));
+    const text = await res.text();
+    configProgress.style.width = '70%';
 
-      let data;
-      try { data = JSON.parse(text); } catch(e) { data = { error: text }; }
-      configProgress.style.width = '90%';
+    let data;
+    try { data = JSON.parse(text); } catch(e) { data = { error: text }; }
+    configProgress.style.width = '90%';
 
-      if (data && !data.error) {
-        uuidValue.textContent = data.uuid || 'n/a';
-        proxyValue.textContent = \`\${data.ip}:\${data.port} (\${data.org||''})\`;
-        activeProxy.textContent = proxyValue.textContent;
+    if (data && !data.error) {
+      uuidValue.textContent = data.uuid || 'n/a';
+      proxyValue.textContent = `${data.ip}:${data.port} (${data.org||''})`;
+      activeProxy.textContent = proxyValue.textContent;
 
+      // ✅ ambil string vless dari config_vls (hindari [object Object])
+      if (data.config_vls && typeof data.config_vls === "object") {
+        const firstKey = Object.keys(data.config_vls)[0]; // misal "vless"
+        configBox.textContent = data.config_vls[firstKey];
+        currentConfig = data.config_vls[firstKey];
+      } else {
         configBox.textContent = data.config_vls || JSON.stringify(data, null, 2);
         currentConfig = configBox.textContent;
-
-        // pool count dari SG + ID
-        const [sgRes, idRes] = await Promise.all([fetch('/SG.txt'), fetch('/ID.txt')]);
-        let sgList = [], idList = [];
-        try { sgList = await sgRes.json(); } catch(e){}
-        try { idList = await idRes.json(); } catch(e){}
-        proxyCount.textContent = (sgList.length + idList.length) + ' proxies available';
-
-        // tampilkan list proxy
-        proxyList.innerHTML = '';
-        [...sgList, ...idList].forEach(p => {
-          const div = document.createElement('div');
-          div.className = 'proxy-item proxy-inactive';
-          div.innerHTML = '<span>\`\${p.prxIP}:\${p.prxPort} - \${p.org||p.country\`}</span><span class="proxy-status">Inactive</span>';
-          if (p.prxIP === data.ip && String(p.prxPort) === String(data.port)) {
-            div.classList.remove('proxy-inactive');
-            div.classList.add('proxy-active');
-            div.querySelector('.proxy-status').textContent = 'Active';
-          }
-          proxyList.appendChild(div);
-        });
-
-        // test ping
-        await testPing({ ip: data.ip, port: data.port });
-      } else {
-        configBox.textContent = 'No config (error)';
-        showNotification('No config returned', 'error');
       }
 
-      setTimeout(()=> configProgress.style.width = '0%', 1000);
-    } catch (err) {
-      console.error(err);
-      configBox.textContent = 'Error loading configuration';
-      showNotification('Error loading configuration', 'error');
+      // pool count dari SG + ID
+      const [sgRes, idRes] = await Promise.all([fetch('/SG.txt'), fetch('/ID.txt')]);
+      let sgList = [], idList = [];
+      try { sgList = await sgRes.json(); } catch(e){}
+      try { idList = await idRes.json(); } catch(e){}
+      proxyCount.textContent = (sgList.length + idList.length) + ' proxies available';
+
+      // tampilkan list proxy
+      proxyList.innerHTML = '';
+      [...sgList, ...idList].forEach(p => {
+        const div = document.createElement('div');
+        div.className = 'proxy-item proxy-inactive';
+        div.innerHTML = '<span>' + p.prxIP + ':' + p.prxPort + ' - ' + (p.org || p.country || '') + '</span><span class="proxy-status">Inactive</span>';
+
+        if (p.prxIP === data.ip && String(p.prxPort) === String(data.port)) {
+          div.classList.remove('proxy-inactive');
+          div.classList.add('proxy-active');
+          div.querySelector('.proxy-status').textContent = 'Active';
+        }
+        proxyList.appendChild(div);
+      });
+
+      // test ping
+      await testPing({ ip: data.ip, port: data.port });
+    } else {
+      configBox.textContent = 'No config (error)';
+      showNotification('No config returned', 'error');
     }
+
+    setTimeout(()=> configProgress.style.width = '0%', 1000);
+  } catch (err) {
+    console.error(err);
+    configBox.textContent = 'Error loading configuration';
+    showNotification('Error loading configuration', 'error');
   }
+}
+
 
   // Ping pakai /health
   async function testPing(proxy) {
