@@ -934,7 +934,7 @@ function serveUI() {
 
       if (data && !data.error) {
         uuidValue.textContent = data.uuid || 'n/a';
-        proxyValue.textContent = ${data.ip}:${data.port} (${data.org||''});
+        proxyValue.textContent = \`\${data.ip}:\${data.port} (\${data.org||''})\`;
         activeProxy.textContent = proxyValue.textContent;
 
         configBox.textContent = data.config_vls || JSON.stringify(data, null, 2);
