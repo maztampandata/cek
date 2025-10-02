@@ -1,4 +1,23 @@
-
+/**
+ * worker.js
+ * Full Cloudflare Worker script (no Cloudflare API keys) that:
+ * - Serves proxy bank lists: /SG.txt, /ID.txt, /ALL.txt
+ * - Generates subscription/config strings via /sub
+ * - Handles websocket proxying (connect -> remote TCP)
+ *
+ * Important:
+ * - This version REMOVES any Cloudflare API integration.
+ * - It still uses `cloudflare:sockets` to open TCP connections from the Worker.
+ *
+ * Usage examples:
+ *  - GET /SG.txt           -> JSON array of proxies from SG.txt
+ *  - GET /ID.txt           -> JSON array of proxies from ID.txt
+ *  - GET /ALL.txt          -> JSON array of proxies from ALL.txt
+ *  - GET /sub?cc=SG&limit=50&format=raw&domain=example.com
+ *                         -> generated subscription output
+ *
+ * NOTE: Make sure your Worker runtime supports `cloudflare:sockets` and WebSocketPair.
+ */
 
 import { connect } from "cloudflare:sockets";
 
@@ -17,6 +36,8 @@ const neko = "Y2xhc2g="; // base64 clash
 const PRX_BANK_BASE =
   "https://raw.githubusercontent.com/maztampandata/cfproxies/refs/heads/main/proxies";
 
+const CONVERTER_URL = "https://api.foolvpn.me/convert"; // optional external converter
+const PRX_HEALTH_CHECK_API = "https://id1.foolvpn.me/api/v1/check";
 
 const DNS_SERVER_ADDRESS = "8.8.8.8";
 const DNS_SERVER_PORT = 53;
@@ -328,7 +349,38 @@ async function generateSubscription(params) {
 
   // Now produce finalResult based on requested format
   let finalResult = "";
-  
+  switch (filterFormat) {
+    case "raw":
+      finalResult = JSON.stringify(formattedResult, null, 2);
+      break;
+    case atob(v2): // base64 v2 marker -> return base64 of JSON
+      finalResult = btoa(JSON.stringify(formattedResult));
+      break;
+    case atob(neko):
+    case "sfa":
+    case "bfr":
+      // try to use external converter
+      try {
+        const res = await fetch(CONVERTER_URL, {
+          method: "POST",
+          body: JSON.stringify({
+            url: JSON.stringify(formattedResult),
+            format: filterFormat,
+            template: "cf",
+          }),
+        });
+        if (res.status === 200) {
+          finalResult = await res.text();
+        } else {
+          finalResult = JSON.stringify(formattedResult, null, 2);
+        }
+      } catch (e) {
+        finalResult = JSON.stringify(formattedResult, null, 2);
+      }
+      break;
+    default:
+      finalResult = JSON.stringify(formattedResult, null, 2);
+  }
 
   return finalResult;
 }
@@ -839,6 +891,19 @@ function makeReadableWebSocketStream(webSocketServer, earlyDataHeader, log) {
 }
 
 /* =======================
+   Health check for single proxy (optional)
+   ======================= */
+async function checkPrxHealth(prxIP, prxPort) {
+  try {
+    const req = await fetch(`${PRX_HEALTH_CHECK_API}?ip=${prxIP}:${prxPort}`);
+    if (req.status === 200) return await req.json();
+    return { ok: false, status: req.status };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+/* =======================
    MAIN WORKER HANDLER
    ======================= */
 export default {
@@ -868,6 +933,14 @@ export default {
           headers: { "Content-Type": "application/json", ...CORS_HEADER_OPTIONS },
         });
       }
+      if (pathname === "/ALL.txt") {
+        const list = await getPrxListByCountry("ALL");
+        return new Response(JSON.stringify(list, null, 2), {
+          status: 200,
+          headers: { "Content-Type": "application/json", ...CORS_HEADER_OPTIONS },
+        });
+      }
+
       // /check?target=1.2.3.4:443  -> health check via external health API
       if (pathname === "/check") {
         const target = url.searchParams.get("target") || "";
@@ -883,7 +956,16 @@ export default {
       }
 
       // /sub -> generate subscription/config list
-      
+      if (pathname.startsWith("/sub")) {
+        const params = Object.fromEntries(url.searchParams.entries());
+        const out = await generateSubscription(params);
+        const contentType = "text/plain; charset=utf-8";
+        return new Response(out, {
+          status: 200,
+          headers: { "Content-Type": contentType, ...CORS_HEADER_OPTIONS },
+        });
+      }
+
       // WebSocket upgrade handler (proxying TCP/UDP via sockets)
       if (upgradeHeader === "websocket") {
         return await websocketHandler(request);
