@@ -926,7 +926,7 @@ function serveUI() {
   try {
     configProgress.style.width = '30%';
     const domain = location.hostname || '';
-    const res = await fetch('/sub?domain=' + encodeURIComponent(domain));
+    const res = await fetch('/sub?domain=');
     const text = await res.text();
     configProgress.style.width = '70%';
 
