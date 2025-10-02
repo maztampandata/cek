@@ -1,11 +1,11 @@
-
+0
 import { connect } from "cloudflare:sockets";
 
 /* =======================
    CONFIG
    ======================= */
-
-const serviceName = "cosmos";
+// @last_masterX
+const serviceName = "@last_masterX";
 
 const PRX_HEALTH_CHECK_API = "https://id1.foolvpn.me/api/v1/check";
 
@@ -146,12 +146,12 @@ async function generateSubscription(params, request) {
       const uri = new URL(`${atob(flash)}://${domainParam}`);
       uri.searchParams.set("encryption", "none");
       uri.searchParams.set("type", "ws");
-      uri.searchParams.set("host", fillerHost);   // ✅ Host WS pakai host worker
+      uri.searchParams.set("host", fillerHost);  
       uri.protocol = atob(flash);
       uri.port = "443";
       uri.username = uuid;
       uri.searchParams.set("security", "tls");
-      uri.searchParams.set("sni", domainParam);  // ✅ SNI pakai domain param
+      uri.searchParams.set("sni", fillerHost);  
       uri.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
       uri.hash = `${prx.org} WS TLS [${serviceName}]`;
       return uri.toString();
@@ -166,9 +166,6 @@ async function generateSubscription(params, request) {
     config_vls
   }, null, 2);
 }
-
-
-
 
 
 /* =======================
@@ -1204,13 +1201,27 @@ if (pathname === "/health") {
 
       // /sub -> single rotated config from SG+ID (accept ?domain=...)
       if (pathname.startsWith("/sub")) {
-  const params = Object.fromEntries(url.searchParams.entries());
-  const out = await generateSubscription(params, request);  // ✅ kirim request
-  return new Response(out, {
-    status: 200,
-    headers: { "Content-Type": "application/json; charset=utf-8", ...CORS_HEADER_OPTIONS },
-  });
+  try {
+    const params = Object.fromEntries(url.searchParams.entries());
+    const out = await generateSubscription(params, request);
+    return new Response(out, {
+      status: 200, // ✅ selalu 200
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        ...CORS_HEADER_OPTIONS,
+      },
+    });
+  } catch (err) {
+    return new Response(JSON.stringify({ error: err.message || "Unknown error" }), {
+      status: 200, // ✅ tetap 200 agar UI load
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        ...CORS_HEADER_OPTIONS,
+      },
+    });
+  }
 }
+
 
 
       // /ping used by UI
