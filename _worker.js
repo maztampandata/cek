@@ -7,11 +7,11 @@ import { connect } from "cloudflare:sockets";
 const rootDomain = "mazlana.biz.id";
 const serviceName = "cosmos";
 const APP_DOMAIN = `${serviceName}.${rootDomain}`;
+const PRX_HEALTH_CHECK_API = "https://id1.foolvpn.me/api/v1/check";
 
-const horse = "dHJvamFu";
+// ENCODE BASE64 VLS BIAR GA 1101//
 const flash = "dmxlc3M=";
-const v2 = "djJyYXk="; 
-const neko = "Y2xhc2g="; 
+const judul= "VkxFU1M=";
 
 const PRX_BANK_BASE =
   "https://raw.githubusercontent.com/maztampandata/cfproxies/refs/heads/main/proxies";
@@ -133,8 +133,26 @@ async function generateSubscription(params) {
   // Ambil satu proxy random
   const prx = prxList[Math.floor(Math.random() * prxList.length)];
   const uuid = crypto.randomUUID();
-  const config_vls = 
-    `${atob(flash)}://${uuid}@${fillerDomain}:443?encryption=none&security=tls&type=ws&host=${APP_DOMAIN}&path=/${prx.prxIP}-${prx.prxPort}#${prx.org} WS TLS [${serviceName}]`;
+ 
+   
+   const config_vls = {})()
+     [atob(flash)]: (() => {
+     const uri = new URL(`${atob(flash)}://${fillerDomain}`);
+     uri.searchParams.set("encryption", "none");
+     uri.searchParams.set("type", "ws");
+     uri.searchParams.set("host", APP_DOMAIN);
+     uri.protocol = atob(flash);
+     uri.port = "443";
+     uri.username = uuid;
+     uri.searchParams.set("security", "tls");
+     uri.searchParams.set("sni", APP_DOMAIN);
+     uri.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
+     uri.hash = `${prx.org} WS TLS [${serviceName}]`;
+     return uri.toString();
+     })()
+              
+
+
 
   const result = {
     uuid,
@@ -653,10 +671,22 @@ function makeReadableWebSocketStream(webSocketServer, earlyDataHeader, log) {
   return stream;
 }
 
-/* =======================
-   UI: serveUI() returns HTML exactly the same as worker 4
-   (UNMODIFIED — copied verbatim)
-   ======================= */
+
+async function checkPrxHealth(prxIP, prxPort) {
+  try {
+    const req = await fetch(`${PRX_HEALTH_CHECK_API}?ip=${prxIP}:${prxPort}`);
+    if (!req.ok) {
+      return { error: 'health_api_error', status: req.status };
+    }
+    const json = await req.json();
+    // json contoh: { "proxy":"138.2.89.64", "port":32962, ..., "delay":1088, ... }
+    return json;
+  } catch (err) {
+    return { error: 'fetch_failed', message: err.message };
+  }
+}
+
+
 function serveUI() {
   const html = `
 <!DOCTYPE html>
@@ -664,7 +694,7 @@ function serveUI() {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>${atob(flash)} Worker - Auto Bank Proxy</title>
+  <title>${atob(judul)} Worker - Auto Bank Proxy</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
     * { margin:0; padding:0; box-sizing:border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
@@ -932,7 +962,8 @@ function serveUI() {
           });
 
           // Ping to active proxy (attempt HEAD to https://<ip> with timeout)
-          await testPing(data.ip);
+          await testPing({ ip: data.ip, port: data.port });
+
         } else {
           configBox.textContent = 'No config (error)';
           showNotification('No config returned', 'error');
@@ -973,49 +1004,78 @@ function serveUI() {
     }
 
     // Ping to given ip
-    async function testPing(targetIp) {
-      try {
-        pingValue.textContent = '...';
-        pingValue.className = 'ping-value';
-        pingStatus.textContent = 'Testing...';
+    // ===== UI: testPing menggunakan /health endpoint (mengambil field delay) =====
+async function testPing(proxy) {
+  try {
+    pingValue.textContent = '...';
+    pingValue.className = 'ping-value';
+    pingStatus.textContent = 'Testing...';
 
-        if (!targetIp) {
-          pingValue.textContent = 'No IP';
-          pingValue.className = 'ping-value ping-bad';
-          pingStatus.textContent = 'No IP';
-          return null;
-        }
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(()=> controller.abort(), 3000);
-
-        const start = Date.now();
-        try {
-          // try HEAD request (mode no-cors because many proxies won't allow CORS)
-          await fetch('https://' + targetIp, { method: 'HEAD', mode: 'no-cors', signal: controller.signal });
-        } finally {
-          clearTimeout(timeoutId);
-        }
-        const end = Date.now();
-        const ping = end - start;
-
-        pingValue.textContent = ping;
-        if (ping < 100) { pingValue.className = 'ping-value ping-good'; pingStatus.textContent = 'ms (Excellent)'; }
-        else if (ping < 300) { pingValue.className = 'ping-value ping-medium'; pingStatus.textContent = 'ms (Good)'; }
-        else { pingValue.className = 'ping-value ping-bad'; pingStatus.textContent = 'ms (Slow)'; }
-
-        lastCheck.textContent = formatTime(end);
-        statusText.textContent = 'Active';
-        return ping;
-      } catch (error) {
-        console.error('Error testing ping:', error);
-        pingValue.textContent = 'Error';
-        pingValue.className = 'ping-value ping-bad';
-        pingStatus.textContent = 'Connection failed';
-        statusText.textContent = 'Error';
-        return null;
-      }
+    if (!proxy || !proxy.ip) {
+      pingValue.textContent = 'No IP';
+      pingValue.className = 'ping-value ping-bad';
+      pingStatus.textContent = 'No IP';
+      return null;
     }
+
+    // Panggil backend /health (backend akan memanggil PRX_HEALTH_CHECK_API)
+    const healthUrl = /health?ip=${encodeURIComponent(proxy.ip)}&port=${encodeURIComponent(proxy.port||'')}
+    const start = Date.now();
+    let latency = null;
+
+    try {
+      const res = await fetch(healthUrl, { method: 'GET' });
+      const data = await res.json();
+      // ambil field 'delay' jika ada (nilai ms)
+      if (data && typeof data.delay !== 'undefined') {
+        latency = Number(data.delay);
+      } else if (data && typeof data.ping !== 'undefined') {
+        // fallback jika API pakai field 'ping'
+        latency = Number(data.ping);
+      } else {
+        // fallback kasar: gunakan elapsed time request sebagai estimate
+        latency = Date.now() - start;
+      }
+    } catch (err) {
+      console.warn('Health API failed', err);
+      latency = Date.now() - start;
+    }
+
+    // tampilkan hasil
+    pingValue.textContent = (isNaN(latency) ? 'N/A' : latency);
+    if (!isNaN(latency)) {
+      if (latency < 100) {
+        pingValue.className = 'ping-value ping-good';
+        pingStatus.textContent = 'ms (Excellent)';
+      } else if (latency < 300) {
+        pingValue.className = 'ping-value ping-medium';
+        pingStatus.textContent = 'ms (Good)';
+      } else {
+        pingValue.className = 'ping-value ping-bad';
+        pingStatus.textContent = 'ms (Slow)';
+      }
+    } else {
+      pingValue.className = 'ping-value ping-bad';
+      pingStatus.textContent = 'N/A';
+    }
+
+    lastCheck.textContent = new Date().toLocaleTimeString();
+    statusText.textContent = 'Active';
+    return latency;
+  } catch (error) {
+    console.error('Error testing ping:', error);
+    pingValue.textContent = 'Error';
+    pingValue.className = 'ping-value ping-bad';
+    pingStatus.textContent = 'Connection failed';
+    statusText.textContent = 'Error';
+    return null;
+  }
+}
+
+    
+    
+    
+    
 
     function toggleAutoPing() {
       if (autoPingInterval) {
@@ -1149,6 +1209,24 @@ export default {
       if (pathname === "/") {
         return serveUI();
       }
+      
+      // route: /health?ip=1.2.3.4&port=443
+if (pathname === "/health") {
+  const ip = url.searchParams.get("ip") || "";
+  const port = url.searchParams.get("port") || "";
+  if (!ip) {
+    return new Response(JSON.stringify({ error: "missing_ip" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json", ...CORS_HEADER_OPTIONS },
+    });
+  }
+  const result = await checkPrxHealth(ip, port);
+  return new Response(JSON.stringify(result, null, 2), {
+    status: 200,
+    headers: { "Content-Type": "application/json", ...CORS_HEADER_OPTIONS },
+  });
+}
+
 
       // Expose SG/ID lists for UI
       if (pathname === "/SG.txt") {
