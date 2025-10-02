@@ -991,7 +991,7 @@ function serveUI() {
       }
 
       const ipPort = proxy.ip + ':' + (proxy.port || '443');
-      const res = await fetch('/health?ip=${encodeURIComponent(ipPort)}');
+      const res = await fetch('/health?ip=\`\${encodeURIComponent(ipPort)}\`');
       const data = await res.json();
 
       let latency = (data && typeof data.delay !== 'undefined') ? Number(data.delay) : null;
