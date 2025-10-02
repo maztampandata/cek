@@ -1114,24 +1114,91 @@ function serveUI() {
 }
 
 
-/* =======================
-   Simple /ping (used by UI)
-   ======================= */
-async function servePing() {
-  // quick simulated ping response (UI measures roundtrip)
-  return new Response(JSON.stringify({
-    status: "ok",
-    timestamp: Date.now(),
-    message: "Ping test successful"
-  }), {
-    headers: {
-      "Content-Type": "application/json",
-      "Cache-Control": "no-cache",
-      "Access-Control-Allow-Origin": "*"
-    }
-  });
-}
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    const pathname = url.pathname;
 
+    // === Endpoint /sub ===
+    if (pathname.startsWith("/sub")) {
+      try {
+        const params = Object.fromEntries(url.searchParams.entries());
+        const out = await generateSubscription(params, request);
+        return new Response(out, {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({
+          error: true,
+          message: "Generate config failed: " + err.message
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+    }
+
+    // === Endpoint /health ===
+    if (pathname.startsWith("/health")) {
+      try {
+        const ipPort = url.searchParams.get("ip");
+        if (!ipPort) throw new Error("missing ip param");
+        const [ip, port] = ipPort.split(":");
+        const result = await checkPrxHealth(ip, port || "443");
+        return new Response(JSON.stringify(result, null, 2), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({
+          error: true,
+          message: "Health check failed: " + err.message
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+    }
+
+    // === Endpoint /proxy (reverse proxy) ===
+    if (pathname.startsWith("/proxy")) {
+      const target = url.searchParams.get("target"); 
+      if (!target) {
+        return new Response(JSON.stringify({ error: true, message: "target required" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      try {
+        const upstream = await fetch(target, request);
+        if (!upstream.ok) {
+          return new Response(JSON.stringify({
+            error: true,
+            status: upstream.status,
+            message: "Upstream returned error " + upstream.status
+          }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        return upstream; // sukses → teruskan hasil upstream
+      } catch (err) {
+        return new Response(JSON.stringify({
+          error: true,
+          status: "fail",
+          message: "Proxy failed: " + err.message
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+    }
+
+    // === Default: serve UI ===
+    return serveUI();
+  }
+};
 /* =======================
    Expose SG and ID raw lists (parsed JSON)
    ======================= */
@@ -1149,91 +1216,6 @@ async function servePrxList(country) {
 /* =======================
    MAIN WORKER HANDLER
    ======================= */
-export default {
-  async fetch(request, env, ctx) {
-    try {
-      const url = new URL(request.url);
-      const pathname = url.pathname;
-      const upgradeHeader = request.headers.get("Upgrade");
-
-      // CORS preflight
-      if (request.method === "OPTIONS") {
-        return new Response(null, { status: 204, headers: CORS_HEADER_OPTIONS });
-      }
-
-      // Root -> UI (exact UI from worker 4)
-      if (pathname === "/") {
-        return serveUI();
-      }
-      
-      // route: /health?ip=1.2.3.4&port=443
-// === Route: /health?ip=IP:PORT ===
-if (pathname === "/health") {
-  const ipPort = url.searchParams.get("ip"); // contoh: "138.2.89.64:32962"
-  if (!ipPort) {
-    return new Response(JSON.stringify({ error: "missing_ip" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  // pisahkan jadi ip dan port
-  const [ip, port] = ipPort.split(":");
-
-  const result = await checkPrxHealth(ip, port || "443");
-  return new Response(JSON.stringify(result, null, 2), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-
-
-
-
-      // Expose SG/ID lists for UI
-      if (pathname === "/SG.txt") {
-        return await servePrxList("SG");
-      }
-      if (pathname === "/ID.txt") {
-        return await servePrxList("ID");
-      }
-
-      // /sub -> single rotated config from SG+ID (accept ?domain=...)
-      if (pathname.startsWith("/sub")) {
-  try {
-    const params = Object.fromEntries(url.searchParams.entries());
-    const out = await generateSubscription(params, request);
-    return new Response(out, {
-      status: 200, // ✅ selalu 200
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        ...CORS_HEADER_OPTIONS,
-      },
-    });
-  } catch (err) {
-    return new Response(JSON.stringify({ error: err.message || "Unknown error" }), {
-      status: 200, // ✅ tetap 200 agar UI load
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        ...CORS_HEADER_OPTIONS,
-      },
-    });
-  }
-}
-
-
-
-      // /ping used by UI
-      if (pathname === "/ping") {
-        return servePing();
-      }
-
-      // WebSocket upgrade handler (proxying TCP/UDP via sockets)
-      if (upgradeHeader === "websocket") {
-        return await websocketHandler(request);
-      }
-
       // Default: simple reverse proxy
       const targetReversePrx = (env && env.REVERSE_PRX_TARGET) || "example.com";
       return await reverseWeb(request, targetReversePrx);
