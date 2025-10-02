@@ -36,8 +36,6 @@ const neko = "Y2xhc2g="; // base64 clash
 const PRX_BANK_BASE =
   "https://raw.githubusercontent.com/maztampandata/cfproxies/refs/heads/main/proxies";
 
-const CONVERTER_URL = "https://api.foolvpn.me/convert"; // optional external converter
-const PRX_HEALTH_CHECK_API = "https://id1.foolvpn.me/api/v1/check";
 
 const DNS_SERVER_ADDRESS = "8.8.8.8";
 const DNS_SERVER_PORT = 53;
@@ -144,245 +142,120 @@ function safeCloseWebSocket(socket) {
 /* =======================
    PROXY / SUB GENERATOR
    ======================= */
+/* =======================
+   PROXY / SUB GENERATOR (ROTATE ONE RANDOM CONFIG from SG+ID with TLS & NTLS)
+   ======================= */
 async function generateSubscription(params) {
-  // params: cc (comma list), port, vpn (comma), limit, format, domain
-  const filterCC = (params.cc || "ALL").split(",").map((s) => s.trim().toUpperCase());
-  const filterPort = (params.port || PORTS.join(",")).split(",").map((s) => s.trim());
-  const filterVPN = (params.vpn || PROTOCOLS.join(","))
-    .split(",")
-    .map((s) => s.trim());
-  const filterLimit = parseInt(params.limit || "1000", 10) || 1000;
-  const filterFormat = params.format || "raw";
   const fillerDomain = params.domain || APP_DOMAIN;
-  const prxListParam = params["prx-list"]; // optional custom raw list URL
 
-  // get list
-  let prxList = [];
-  if (prxListParam) {
-    try {
-      const res = await fetch(prxListParam);
-      if (res.status === 200) {
-        const text = await res.text();
-        prxList = text.split("\n").filter(Boolean).map((line) => {
-          const [ip, port, cc, org] = line.split(",").map((s) => s.trim());
-          return { prxIP: ip, prxPort: port || "443", country: cc || "ALL", org: org || "Unknown" };
-        });
-      }
-    } catch (e) {
-      prxList = [];
-    }
-  } else {
-    // If user asks multiple CCs, prioritize those; else ALL
-    if (filterCC.length === 1 && filterCC[0] !== "ALL") {
-      prxList = await getPrxListByCountry(filterCC[0]);
-    } else {
-      // merge lists for requested CCs
-      if (filterCC.includes("ALL")) {
-        prxList = await getPrxListByCountry("ALL");
-      } else {
-        // fetch per requested cc and flatten
-        const arrs = await Promise.all(filterCC.map((cc) => getPrxListByCountry(cc)));
-        prxList = arrs.flat();
-      }
-    }
-  }
+  // Ambil list SG + ID
+  const sgList = await getPrxListByCountry("SG");
+  const idList = await getPrxListByCountry("ID");
+  const prxList = [...sgList, ...idList];
+  if (!prxList.length) return "No proxy available";
 
-  if (!prxList || prxList.length === 0) return [];
-
-  // filter by country if filterCC explicitly provided
-  if (filterCC.length && !filterCC.includes("ALL")) {
-    prxList = prxList.filter((p) => filterCC.includes((p.country || "").toUpperCase()));
-  }
-
-  shuffleArray(prxList);
-
+  // Ambil satu proxy random
+  const prx = prxList[Math.floor(Math.random() * prxList.length)];
   const uuid = crypto.randomUUID();
-  const result = [];
-  for (const prx of prxList) {
-    for (const port of filterPort) {
-      for (const protocol of filterVPN) {
-        if (result.length >= filterLimit) break;
 
-        try {
-          const uri = new URL(`${atob(horse)}://${fillerDomain}`);
-          uri.searchParams.set("encryption", "none");
-          uri.searchParams.set("type", "ws");
-          uri.searchParams.set("host", APP_DOMAIN);
+  // Config TLS (port 443)
+  const config_tls = {
+    trojan: (() => {
+      const uri = new URL(`${atob(horse)}://${fillerDomain}`);
+      uri.username = uuid;
+      uri.port = "443";
+      uri.protocol = atob(horse);
+      uri.searchParams.set("type", "ws");
+      uri.searchParams.set("security", "tls");
+      uri.searchParams.set("sni", APP_DOMAIN);
+      uri.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
+      uri.searchParams.set("host", APP_DOMAIN);
+      uri.hash = `${prx.org} WS TLS [${serviceName}]`;
+      return uri.toString();
+    })(),
+    vmess: (() => {
+      const uri = new URL(`${atob(flash)}://${fillerDomain}`);
+      uri.username = uuid;
+      uri.port = "443";
+      uri.protocol = atob(flash);
+      uri.searchParams.set("type", "ws");
+      uri.searchParams.set("security", "tls");
+      uri.searchParams.set("sni", APP_DOMAIN);
+      uri.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
+      uri.searchParams.set("host", APP_DOMAIN);
+      uri.hash = `${prx.org} WS TLS [${serviceName}]`;
+      return uri.toString();
+    })(),
+    ss: (() => {
+      const uri = new URL(`ss://${fillerDomain}`);
+      uri.username = btoa(`none:${uuid}`);
+      uri.port = "443";
+      uri.protocol = "ss";
+      uri.searchParams.set("plugin", `${atob(v2)}-plugin;tls;mux=0;mode=websocket;path=/${prx.prxIP}-${prx.prxPort};host=${APP_DOMAIN}`);
+      uri.searchParams.set("type", "ws");
+      uri.searchParams.set("security", "tls");
+      uri.searchParams.set("sni", APP_DOMAIN);
+      uri.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
+      uri.searchParams.set("host", APP_DOMAIN);
+      uri.hash = `${prx.org} WS TLS [${serviceName}]`;
+      return uri.toString();
+    })()
+  };
 
-          uri.protocol = protocol;
-          uri.port = port.toString();
-          if (protocol === "ss") {
-            uri.username = btoa(`none:${uuid}`);
-            uri.searchParams.set(
-              "plugin",
-              `${atob(v2)}-plugin${port == 80 ? "" : ";tls"};mux=0;mode=websocket;path=/${prx.prxIP}-${prx.prxPort};host=${APP_DOMAIN}`
-            );
-          } else {
-            uri.username = uuid;
-            uri.searchParams.delete("plugin");
-          }
+  // Config NTLS (port 80)
+  const config_ntls = {
+    trojan: (() => {
+      const uri = new URL(`${atob(horse)}://${fillerDomain}`);
+      uri.username = uuid;
+      uri.port = "80";
+      uri.protocol = atob(horse);
+      uri.searchParams.set("type", "ws");
+      uri.searchParams.set("security", "none");
+      uri.searchParams.set("sni", "");
+      uri.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
+      uri.searchParams.set("host", APP_DOMAIN);
+      uri.hash = `${prx.org} WS NTLS [${serviceName}]`;
+      return uri.toString();
+    })(),
+    vmess: (() => {
+      const uri = new URL(`${atob(flash)}://${fillerDomain}`);
+      uri.username = uuid;
+      uri.port = "80";
+      uri.protocol = atob(flash);
+      uri.searchParams.set("type", "ws");
+      uri.searchParams.set("security", "none");
+      uri.searchParams.set("sni", "");
+      uri.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
+      uri.searchParams.set("host", APP_DOMAIN);
+      uri.hash = `${prx.org} WS NTLS [${serviceName}]`;
+      return uri.toString();
+    })(),
+    ss: (() => {
+      const uri = new URL(`ss://${fillerDomain}`);
+      uri.username = btoa(`none:${uuid}`);
+      uri.port = "80";
+      uri.protocol = "ss";
+      uri.searchParams.set("plugin", `${atob(v2)}-plugin;mux=0;mode=websocket;path=/${prx.prxIP}-${prx.prxPort};host=${APP_DOMAIN}`);
+      uri.searchParams.set("type", "ws");
+      uri.searchParams.set("security", "none");
+      uri.searchParams.set("sni", "");
+      uri.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
+      uri.searchParams.set("host", APP_DOMAIN);
+      uri.hash = `${prx.org} WS NTLS [${serviceName}]`;
+      return uri.toString();
+    })()
+  };
 
-          uri.searchParams.set("security", port == 443 ? "tls" : "none");
-          uri.searchParams.set("sni", port == 80 && protocol === atob(flash) ? "" : APP_DOMAIN);
-          uri.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
-          uri.hash = `${result.length + 1} ${prx.org} WS ${port == 443 ? "TLS" : "NTLS"} [${serviceName}]`;
+  // Hasil akhir: info proxy + config TLS/NTLS
+  const result = {
+    ip: prx.prxIP,
+    port: prx.prxPort,
+    org: prx.org,
+    config_tls,
+    config_ntls
+  };
 
-          result.push(uri.toString());
-        } catch (e) {
-          // skip bad entries
-        }
-      }
-      if (result.length >= filterLimit) break;
-    }
-    if (result.length >= filterLimit) break;
-  }
-
-  // Build formattedResult (useful structured version)
-  const formattedResult = prxList.slice(0, filterLimit).map((prx, idx) => {
-    const config_tls = {
-      [atob(horse)]: (() => {
-        const uri = new URL(`${atob(horse)}://${fillerDomain}`);
-        uri.searchParams.set("encryption", "none");
-        uri.searchParams.set("type", "ws");
-        uri.searchParams.set("host", APP_DOMAIN);
-        uri.protocol = atob(horse);
-        uri.port = "443";
-        uri.username = uuid;
-        uri.searchParams.set("security", "tls");
-        uri.searchParams.set("sni", APP_DOMAIN);
-        uri.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
-        uri.hash = `${prx.org} WS TLS [${serviceName}]`;
-        return uri.toString();
-      })(),
-      [atob(flash)]: (() => {
-        const uri = new URL(`${atob(flash)}://${fillerDomain}`);
-        uri.searchParams.set("encryption", "none");
-        uri.searchParams.set("type", "ws");
-        uri.searchParams.set("host", APP_DOMAIN);
-        uri.protocol = atob(flash);
-        uri.port = "443";
-        uri.username = uuid;
-        uri.searchParams.set("security", "tls");
-        uri.searchParams.set("sni", APP_DOMAIN);
-        uri.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
-        uri.hash = `${prx.org} WS TLS [${serviceName}]`;
-        return uri.toString();
-      })(),
-      ss: (() => {
-        const uri = new URL(`ss://${fillerDomain}`);
-        uri.searchParams.set("encryption", "none");
-        uri.searchParams.set("type", "ws");
-        uri.searchParams.set("host", APP_DOMAIN);
-        uri.protocol = "ss";
-        uri.port = "443";
-        uri.username = btoa(`none:${uuid}`);
-        uri.searchParams.set("security", "tls");
-        uri.searchParams.set("sni", APP_DOMAIN);
-        uri.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
-        uri.searchParams.set(
-          "plugin",
-          `${atob(v2)}-plugin;tls;mux=0;mode=websocket;path=/${prx.prxIP}-${prx.prxPort};host=${APP_DOMAIN}`
-        );
-        uri.hash = `${prx.org} WS TLS [${serviceName}]`;
-        return uri.toString();
-      })(),
-    };
-
-    const config_ntls = {
-      [atob(horse)]: (() => {
-        const uri = new URL(`${atob(horse)}://${fillerDomain}`);
-        uri.searchParams.set("encryption", "none");
-        uri.searchParams.set("type", "ws");
-        uri.searchParams.set("host", APP_DOMAIN);
-        uri.protocol = atob(horse);
-        uri.port = "80";
-        uri.username = uuid;
-        uri.searchParams.set("security", "none");
-        uri.searchParams.set("sni", "");
-        uri.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
-        uri.hash = `${prx.org} WS NTLS [${serviceName}]`;
-        return uri.toString();
-      })(),
-      [atob(flash)]: (() => {
-        const uri = new URL(`${atob(flash)}://${fillerDomain}`);
-        uri.searchParams.set("encryption", "none");
-        uri.searchParams.set("type", "ws");
-        uri.searchParams.set("host", APP_DOMAIN);
-        uri.protocol = atob(flash);
-        uri.port = "80";
-        uri.username = uuid;
-        uri.searchParams.set("security", "none");
-        uri.searchParams.set("sni", "");
-        uri.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
-        uri.hash = `${prx.org} WS NTLS [${serviceName}]`;
-        return uri.toString();
-      })(),
-      ss: (() => {
-        const uri = new URL(`ss://${fillerDomain}`);
-        uri.searchParams.set("encryption", "none");
-        uri.searchParams.set("type", "ws");
-        uri.searchParams.set("host", APP_DOMAIN);
-        uri.protocol = "ss";
-        uri.port = "80";
-        uri.username = btoa(`none:${uuid}`);
-        uri.searchParams.set("security", "none");
-        uri.searchParams.set("sni", "");
-        uri.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
-        uri.searchParams.set(
-          "plugin",
-          `${atob(v2)}-plugin;mux=0;mode=websocket;path=/${prx.prxIP}-${prx.prxPort};host=${APP_DOMAIN}`
-        );
-        uri.hash = `${prx.org} WS NTLS [${serviceName}]`;
-        return uri.toString();
-      })(),
-    };
-
-    return {
-      ip: prx.prxIP,
-      port: prx.prxPort,
-      orgz: prx.org,
-      config_tls,
-      config_ntls,
-      idx,
-    };
-  });
-
-  // Now produce finalResult based on requested format
-  let finalResult = "";
-  switch (filterFormat) {
-    case "raw":
-      finalResult = JSON.stringify(formattedResult, null, 2);
-      break;
-    case atob(v2): // base64 v2 marker -> return base64 of JSON
-      finalResult = btoa(JSON.stringify(formattedResult));
-      break;
-    case atob(neko):
-    case "sfa":
-    case "bfr":
-      // try to use external converter
-      try {
-        const res = await fetch(CONVERTER_URL, {
-          method: "POST",
-          body: JSON.stringify({
-            url: JSON.stringify(formattedResult),
-            format: filterFormat,
-            template: "cf",
-          }),
-        });
-        if (res.status === 200) {
-          finalResult = await res.text();
-        } else {
-          finalResult = JSON.stringify(formattedResult, null, 2);
-        }
-      } catch (e) {
-        finalResult = JSON.stringify(formattedResult, null, 2);
-      }
-      break;
-    default:
-      finalResult = JSON.stringify(formattedResult, null, 2);
-  }
-
-  return finalResult;
+  return JSON.stringify(result, null, 2);
 }
 
 /* =======================
@@ -890,18 +763,7 @@ function makeReadableWebSocketStream(webSocketServer, earlyDataHeader, log) {
   return stream;
 }
 
-/* =======================
-   Health check for single proxy (optional)
-   ======================= */
-async function checkPrxHealth(prxIP, prxPort) {
-  try {
-    const req = await fetch(`${PRX_HEALTH_CHECK_API}?ip=${prxIP}:${prxPort}`);
-    if (req.status === 200) return await req.json();
-    return { ok: false, status: req.status };
-  } catch (e) {
-    return { ok: false, error: e.message };
-  }
-}
+
 
 /* =======================
    MAIN WORKER HANDLER
@@ -918,44 +780,6 @@ export default {
         return new Response(null, { status: 204, headers: CORS_HEADER_OPTIONS });
       }
 
-      // Proxy files: /SG.txt, /ID.txt, /ALL.txt
-      if (pathname === "/SG.txt") {
-        const list = await getPrxListByCountry("SG");
-        return new Response(JSON.stringify(list, null, 2), {
-          status: 200,
-          headers: { "Content-Type": "application/json", ...CORS_HEADER_OPTIONS },
-        });
-      }
-      if (pathname === "/ID.txt") {
-        const list = await getPrxListByCountry("ID");
-        return new Response(JSON.stringify(list, null, 2), {
-          status: 200,
-          headers: { "Content-Type": "application/json", ...CORS_HEADER_OPTIONS },
-        });
-      }
-      if (pathname === "/ALL.txt") {
-        const list = await getPrxListByCountry("ALL");
-        return new Response(JSON.stringify(list, null, 2), {
-          status: 200,
-          headers: { "Content-Type": "application/json", ...CORS_HEADER_OPTIONS },
-        });
-      }
-
-      // /check?target=1.2.3.4:443  -> health check via external health API
-      if (pathname === "/check") {
-        const target = url.searchParams.get("target") || "";
-        const [ip, port] = target.split(":");
-        if (!ip) {
-          return new Response("Missing target", { status: 400 });
-        }
-        const res = await checkPrxHealth(ip, port || "443");
-        return new Response(JSON.stringify(res, null, 2), {
-          status: 200,
-          headers: { "Content-Type": "application/json", ...CORS_HEADER_OPTIONS },
-        });
-      }
-
-      // /sub -> generate subscription/config list
       if (pathname.startsWith("/sub")) {
         const params = Object.fromEntries(url.searchParams.entries());
         const out = await generateSubscription(params);
