@@ -1298,3 +1298,5 @@ export default {
     return serveUI();
   }
 };
+
+// === Helper Functions ===
