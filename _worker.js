@@ -858,7 +858,7 @@ function serveUI() {
     </div>
 
     <div class="footer">
-      <p>${atob(flash)} Worker • Auto Bank Proxy System • Real-time Monitoring</p>
+      <p>${atob(judul)} Worker • Auto Bank Proxy System • Real-time Monitoring</p>
       <p style="margin-top:10px; font-size:0.8rem;">System secara otomatis menghasilkan proxy bank dan UUID untuk koneksi yang aman</p>
     </div>
   </div>
@@ -934,7 +934,8 @@ function serveUI() {
 
     if (data && !data.error) {
       uuidValue.textContent = data.uuid || 'n/a';
-      proxyValue.textContent = `${data.ip}:${data.port} (${data.org||''})`;
+      proxyValue.textContent = data.ip + ':' + data.port + ' (' + (data.org || data.country || 'Unknown') + ')';
+
       activeProxy.textContent = proxyValue.textContent;
 
       // ✅ ambil string vless dari config_vls (hindari [object Object])
@@ -1000,7 +1001,8 @@ function serveUI() {
       }
 
       const ipPort = proxy.ip + ':' + (proxy.port || '443');
-      const res = await fetch('/health?ip=\`\${encodeURIComponent(ipPort)}\`');
+      const res = await fetch('/health?ip=' + encodeURIComponent(ipPort));
+
       const data = await res.json();
 
       let latency = (data && typeof data.delay !== 'undefined') ? Number(data.delay) : null;
