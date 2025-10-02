@@ -4,9 +4,9 @@ import { connect } from "cloudflare:sockets";
 /* =======================
    CONFIG
    ======================= */
-const rootDomain = "mazlana.biz.id";
-const serviceName = "cosmos";
-const APP_DOMAIN = `${serviceName}.${rootDomain}`;
+
+const serviceName = "@last_masterX";
+
 const PRX_HEALTH_CHECK_API = "https://id1.foolvpn.me/api/v1/check";
 
 // ENCODE BASE64 VLS BIAR GA 1101//
@@ -125,8 +125,8 @@ function safeCloseWebSocket(socket) {
    PROXY / SUB GENERATOR (ROTATE ONE RANDOM CONFIG from SG+ID with TLS & NTLS)
    ======================= */
 async function generateSubscription(params) {
-  const fillerDomain = params.domain || APP_DOMAIN;
-
+  const fillerDomain = params.domain || "bug.com";
+  const fillerHost = request.headers.get("Host")
   // Ambil list SG + ID
   const sgList = await getPrxListByCountry("SG");
   const idList = await getPrxListByCountry("ID");
@@ -143,12 +143,12 @@ async function generateSubscription(params) {
      const uri = new URL(`${atob(flash)}://${fillerDomain}`);
      uri.searchParams.set("encryption", "none");
      uri.searchParams.set("type", "ws");
-     uri.searchParams.set("host", APP_DOMAIN);
+     uri.searchParams.set("host", fillerHost);
      uri.protocol = atob(flash);
      uri.port = "443";
      uri.username = uuid;
      uri.searchParams.set("security", "tls");
-     uri.searchParams.set("sni", APP_DOMAIN);
+     uri.searchParams.set("sni", fillerHost);
      uri.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
      uri.hash = `${prx.org} WS TLS [${serviceName}]`;
      return uri.toString();
@@ -751,7 +751,7 @@ function serveUI() {
 <body>
   <div class="container">
     <div class="header">
-      <h1><i class="fas fa-shield-alt"></i> ${atob(flash)} Worker</h1>
+      <h1><i class="fas fa-shield-alt"></i> ${atob(judul)} WORKER</h1>
       <p>Auto Bank Proxy System dengan UUID Otomatis dan Monitoring Real-time</p>
       <div style="margin-top:15px;">
         <span class="badge">Auto Proxy</span>
@@ -770,17 +770,17 @@ function serveUI() {
 
         <div class="info-grid">
           <div class="info-item">
-            <span class="info-label"><i class="fas fa-fingerprint"></i> UUID:</span>
+            <span class="info-label"><i class="fas fa-fingerprint"></i> UUID :</span>
             <span class="info-value" id="uuid-value"><div class="loading"></div></span>
           </div>
 
           <div class="info-item">
-            <span class="info-label"><i class="fas fa-server"></i> Proxy Server:</span>
+            <span class="info-label"><i class="fas fa-server"></i> SERVER :</span>
             <span class="info-value" id="proxy-value"><div class="loading"></div></span>
           </div>
 
           <div class="info-item">
-            <span class="info-label"><i class="fas fa-circle"></i> Status:</span>
+            <span class="info-label"><i class="fas fa-circle"></i> STATUS :</span>
             <span class="info-value">
               <span class="status-indicator status-active"></span>
               <span id="status-text">Active</span>
@@ -806,7 +806,7 @@ function serveUI() {
 
         <div class="info-grid">
           <div class="info-item">
-            <span class="info-label"><i class="fas fa-signal"></i> Ping Saat Ini:</span>
+            <span class="info-label"><i class="fas fa-signal"></i> Ping  :</span>
             <div class="ping-container">
               <span class="ping-value" id="ping-value">--</span>
               <span id="ping-status">ms</span>
@@ -814,12 +814,12 @@ function serveUI() {
           </div>
 
           <div class="info-item">
-            <span class="info-label"><i class="fas fa-clock"></i> Terakhir Diperiksa:</span>
+            <span class="info-label"><i class="fas fa-clock"></i> Terakhir Diperiksa :</span>
             <span class="info-value" id="last-check">Never</span>
           </div>
 
           <div class="info-item">
-            <span class="info-label"><i class="fas fa-stopwatch"></i> Uptime:</span>
+            <span class="info-label"><i class="fas fa-stopwatch"></i> Aktif Selama :</span>
             <span class="info-value" id="uptime-value">Calculating...</span>
           </div>
         </div>
@@ -838,12 +838,12 @@ function serveUI() {
 
         <div class="info-grid">
           <div class="info-item">
-            <span class="info-label"><i class="fas fa-shield-alt"></i> Proxy Aktif:</span>
+            <span class="info-label"><i class="fas fa-shield-alt"></i> Proxy Aktif :</span>
             <span class="info-value" id="active-proxy"><div class="loading"></div></span>
           </div>
 
           <div class="info-item">
-            <span class="info-label"><i class="fas fa-database"></i> Pool Proxy:</span>
+            <span class="info-label"><i class="fas fa-database"></i> Pool Proxy :</span>
             <span class="info-value" id="proxy-count"><div class="loading"></div></span>
           </div>
         </div>
