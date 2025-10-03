@@ -2144,6 +2144,14 @@ export default {
       });
     }
 
+    // Expose proxy list
+    if (pathname === "/SG.txt") {
+      return await servePrxList("SG");
+    }
+    if (pathname === "/ID.txt") {
+      return await servePrxList("ID");
+    }
+
     // Subscription
     if (pathname.startsWith("/sub")) {
       const params = Object.fromEntries(url.searchParams.entries());
@@ -2164,14 +2172,10 @@ export default {
 
     // WebSocket
     if (upgradeHeader === "websocket") {
-      const prxMatch = url.pathname.match(/^\/(.+[:=-]\d+)$/);
-      selectedPrxIP = prxMatch[1];
-     return await websocketHandler(request);
-     
+      return await websocketHandler(request);
     }
 
-
-  
+    // Default reverse proxy
     const targetReversePrx = (env && env.REVERSE_PRX_TARGET) || "example.com";
     return await reverseWeb(request, targetReversePrx, null, env, ctx);
   },
