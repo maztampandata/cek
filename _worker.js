@@ -118,9 +118,7 @@ export default {
       const upgradeHeader = request.headers.get("Upgrade");
 
       // Gateway check
-      if (apiKey && apiEmail && accountID && zoneID) {
-        isApiReady = true;
-      }
+     
 
       // Handle prx client
       // Handle country-specific proxy files
