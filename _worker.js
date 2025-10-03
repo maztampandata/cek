@@ -257,7 +257,7 @@ async function generateSubscription(params, request) {
 /* =======================
    Reverse Web / Basic Proxy
    ======================= */
-async function reverseWeb(request, target, targetPath) {
+async function reverseWeb(request, target, targetPath, env, ctx) {
   const targetUrl = new URL(request.url);
   const targetChunk = (target || "example.com").split(":");
 
@@ -267,20 +267,25 @@ async function reverseWeb(request, target, targetPath) {
 
   const modifiedRequest = new Request(targetUrl, request);
   modifiedRequest.headers.set("X-Forwarded-Host", request.headers.get("Host") || "");
+
   const response = await fetch(modifiedRequest);
   const newResponse = new Response(response.body, response);
+
+  // Tambah CORS header
   for (const [key, value] of Object.entries(CORS_HEADER_OPTIONS)) {
     newResponse.headers.set(key, value);
   }
   newResponse.headers.set("X-Proxied-By", "Worker");
   
-  // Update traffic stats untuk reverse proxy
-  const contentLength = response.headers.get('content-length');
+  // ✅ Update traffic stats untuk reverse proxy
+  const contentLength = response.headers.get("content-length");
   const responseSize = contentLength ? parseInt(contentLength) : 0;
-  updateTrafficStats(request, responseSize);
-  
+
+  ctx.waitUntil(updateTrafficStats(request, responseSize, env));
+
   return newResponse;
 }
+
 
 /* =======================
    WEBSOCKET HANDLER + TCP/UDP logic
@@ -1765,10 +1770,22 @@ export default {
       if (upgradeHeader !== "websocket") {
         // Estimate response size untuk tracking
         const originalResponse = await this.handleRequest(request, env, ctx);
-        const contentLength = originalResponse.headers.get('content-length');
-        const responseSize = contentLength ? parseInt(contentLength) : 0;
-        
-        updateTrafficStats(request, responseSize);
+        const contentLength = originalResponse.headers.get("content-length");
+        let responseSize = contentLength ? parseInt(contentLength) : 0;
+
+        // Kalau tidak ada content-length, coba hitung isi response
+        if (!responseSize) {
+          try {
+            const body = await originalResponse.clone().text();
+            responseSize = new TextEncoder().encode(body).length;
+          } catch (_) {
+            responseSize = 0;
+          }
+        }
+
+        // ✅ perbaikan: sertakan env + ctx.waitUntil
+        ctx.waitUntil(updateTrafficStats(request, responseSize, env));
+
         return originalResponse;
       }
 
@@ -1791,18 +1808,20 @@ export default {
       return new Response(null, { status: 204, headers: CORS_HEADER_OPTIONS });
     }
 
-    // Root -> UI (exact UI from worker 4)
+    // Root -> UI
     if (pathname === "/") {
-      const response = serveUI();
-      return response;
+      return serveUI();
     }
-    
-    // Traffic stats endpoint
+
+    // Statistik
     if (pathname === "/traffic") {
-      return await serveTrafficStats(request);
+      const stats = await getTrafficStats(env);
+      return new Response(JSON.stringify(stats, null, 2), {
+        headers: { "Content-Type": "application/json" },
+      });
     }
-    
-    // route: /health?ip=1.2.3.4&port=443
+
+    // Health check
     if (pathname === "/health") {
       const ipPort = url.searchParams.get("ip");
       if (!ipPort) {
@@ -1811,7 +1830,6 @@ export default {
           headers: { "Content-Type": "application/json" },
         });
       }
-
       const [ip, port] = ipPort.split(":");
       const result = await checkPrxHealth(ip, port || "443");
       return new Response(JSON.stringify(result, null, 2), {
@@ -1820,7 +1838,7 @@ export default {
       });
     }
 
-    // Expose SG/ID lists for UI
+    // Expose proxy list
     if (pathname === "/SG.txt") {
       return await servePrxList("SG");
     }
@@ -1828,28 +1846,31 @@ export default {
       return await servePrxList("ID");
     }
 
-    // /sub -> single rotated config from SG+ID (accept ?domain=...)
+    // Subscription
     if (pathname.startsWith("/sub")) {
       const params = Object.fromEntries(url.searchParams.entries());
       const out = await generateSubscription(params, request);
       return new Response(out, {
         status: 200,
-        headers: { "Content-Type": "application/json; charset=utf-8", ...CORS_HEADER_OPTIONS },
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          ...CORS_HEADER_OPTIONS,
+        },
       });
     }
 
-    // /ping used by UI
+    // Ping
     if (pathname === "/ping") {
       return servePing();
     }
 
-    // WebSocket upgrade handler (proxying TCP/UDP via sockets)
+    // WebSocket
     if (upgradeHeader === "websocket") {
       return await websocketHandler(request);
     }
 
-    // Default: simple reverse proxy
+    // Default reverse proxy
     const targetReversePrx = (env && env.REVERSE_PRX_TARGET) || "example.com";
-    return await reverseWeb(request, targetReversePrx);
-  }
+    return await reverseWeb(request, targetReversePrx, null, env, ctx);
+  },
 };
