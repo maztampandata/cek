@@ -34,10 +34,10 @@ const PROXY_SOURCE = [
   { prxIP: "103.6.207.108", prxPort: "8080", country: "ID", org: "PT Pusat Media Indonesia" },
   { prxIP: "36.95.152.58", prxPort: "12137", country: "ID", org: "PT Telekomunikasi Indonesia" },
 ];
-
 async function getPrxList() {
-  const picked = PROXY_SOURCE[Math.floor(Math.random() * PROXY_SOURCE.length)];
-  return [picked];
+  const shuffled = [...PROXY_SOURCE];
+  shuffleArray(shuffled);  
+  return shuffled[Math.floor(Math.random() * shuffled.length)]; // return 1 proxy random
 }
 
 
