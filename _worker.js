@@ -1625,7 +1625,7 @@ function serveUI() {
   // Traffic Monitoring Functions
   async function loadTrafficStats() {
     try {
-      const response = await fetch('/traffic');
+      const response = await fetch("/traffic?_=" + Date.now());
       const data = await response.json();
       
       // Update UI dengan data traffic
@@ -1966,10 +1966,11 @@ function serveUI() {
   }, 1000);
 
   setInterval(updateUptime, 1000);
-  // Auto refresh traffic stats every 30 seconds
-  setInterval(loadTrafficStats, 30000);
-  // Auto refresh visitor info every 60 seconds
-  setInterval(loadVisitorInfo, 60000);
+  // Auto refresh traffic stats every 5 seconds
+  setInterval(loadTrafficStats, 5000);
+  // Auto refresh visitor info every 5 seconds
+  setInterval(loadVisitorInfo, 5000);
+  
 </script>
 
 </body>
