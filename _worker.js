@@ -1815,7 +1815,7 @@ export default {
 
     // Statistik
     if (pathname === "/traffic") {
-      const stats = await getTrafficStats(env);
+      return await serveTrafficStats(request, env);
       return new Response(JSON.stringify(stats, null, 2), {
         headers: { "Content-Type": "application/json" },
       });
