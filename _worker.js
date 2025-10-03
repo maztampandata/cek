@@ -2171,9 +2171,35 @@ export default {
     }
 
     // WebSocket
-    if (upgradeHeader === "websocket") {
-      return await websocketHandler(request);
-    }
+   if (upgradeHeader === "websocket") {
+            let selectedPrxIP = null;
+            let selectedPrxPort = null;
+            // Match /ip:port or /ip-port or /ip=port
+            const prxMatch = url.pathname.match(/^\/(.+?)([:=-])(\d+)$/);
+            if (prxMatch) {
+              selectedPrxIP = prxMatch[1];
+              selectedPrxPort = prxMatch[3];
+            }
+            // If not direct, fallback to random from SG+ID
+            if (!selectedPrxIP || !selectedPrxPort) {
+              const sgList = await getPrxListByCountry("SG");
+              const idList = await getPrxListByCountry("ID");
+              const prxList = [...sgList, ...idList];
+              if (prxList.length) {
+                const prx = prxList[Math.floor(Math.random() * prxList.length)];
+                selectedPrxIP = prx.prxIP;
+                selectedPrxPort = prx.prxPort;
+              }
+            }
+            if (selectedPrxIP && selectedPrxPort) {
+              // Attach to request for websocketHandler
+              request.selectedPrxIP = selectedPrxIP;
+              request.selectedPrxPort = selectedPrxPort;
+              return await websocketHandler(request);
+            } else {
+              return new Response("Invalid proxy selection", { status: 400, headers: CORS_HEADER_OPTIONS });
+            }
+          }
 
     // Default reverse proxy
     const targetReversePrx = (env && env.REVERSE_PRX_TARGET) || "example.com";
