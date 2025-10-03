@@ -1,3 +1,4 @@
+
 import { connect } from "cloudflare:sockets";
 
 /* =======================
@@ -33,94 +34,7 @@ const CORS_HEADER_OPTIONS = {
   "Access-Control-Max-Age": "86400",
 };
 
-let trafficStats = null;
-let cachedPrxList = {}; 
-
-async function loadTrafficStats(env) {
-  if (trafficStats) return trafficStats;
-  const raw = await env.traffic_stats.get("trafficStats");
-  if (raw) {
-    const parsed = JSON.parse(raw);
-    parsed.uniqueVisitors = new Set(parsed.uniqueVisitors || []);
-    trafficStats = parsed;
-  } else {
-    trafficStats = {
-      totalVisitors: 0,
-      uniqueVisitors: new Set(),
-      bandwidthUsed: 0,
-      todayVisitors: 0,
-      todayBandwidth: 0,
-      lastReset: new Date().toISOString().split('T')[0]
-    };
-    await saveTrafficStats(env);
-  }
-  return trafficStats;
-}
-
-async function saveTrafficStats(env) {
-  if (!trafficStats) return;
-  const serializable = {
-    ...trafficStats,
-    uniqueVisitors: Array.from(trafficStats.uniqueVisitors)
-  };
-  await env.traffic_stats.put("trafficStats", JSON.stringify(serializable));
-}
-
-// Fungsi untuk mendapatkan visitor ID berdasarkan IP dan User-Agent
-function getVisitorId(request) {
-  const ip = request.headers.get('cf-connecting-ip') || 'unknown';
-  const userAgent = request.headers.get('user-agent') || 'unknown';
-  const accept = request.headers.get('accept') || 'unknown';
-  
-  // Hash sederhana untuk membuat ID unik
-  const data = ip + userAgent + accept;
-  let hash = 0;
-  for (let i = 0; i < data.length; i++) {
-    const char = data.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32bit integer
-  }
-  return Math.abs(hash).toString(36);
-}
-
-// Fungsi untuk update traffic stats
-export async function updateTrafficStats(request, responseSize = 0, env) {
-  await loadTrafficStats(env);
-  const visitorId = getVisitorId(request);
-  const today = new Date().toISOString().split('T')[0];
-
-  if (trafficStats.lastReset !== today) {
-    trafficStats.todayVisitors = 0;
-    trafficStats.todayBandwidth = 0;
-    trafficStats.lastReset = today;
-    trafficStats.uniqueVisitors = new Set();
-  }
-
-  if (!trafficStats.uniqueVisitors.has(visitorId)) {
-    trafficStats.uniqueVisitors.add(visitorId);
-    trafficStats.totalVisitors++;
-    trafficStats.todayVisitors++;
-  }
-
-  trafficStats.bandwidthUsed += responseSize;
-  trafficStats.todayBandwidth += responseSize;
-
-  await saveTrafficStats(env);
-}
-
-
-// Fungsi untuk format bytes ke readable format
-function formatBytes(bytes, decimals = 2) {
-  if (bytes === 0) return '0 Bytes';
-  
-  const k = 1024;
-  const dm = decimals < 0 ? 0 : decimals;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-  
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
-}
+let cachedPrxList = {}; // cache per countryKey -> array
 
 /* =======================
    UTIL: Fetch proxy list file and parse
@@ -257,7 +171,7 @@ async function generateSubscription(params, request) {
 /* =======================
    Reverse Web / Basic Proxy
    ======================= */
-async function reverseWeb(request, target, targetPath, env, ctx) {
+async function reverseWeb(request, target, targetPath) {
   const targetUrl = new URL(request.url);
   const targetChunk = (target || "example.com").split(":");
 
@@ -267,25 +181,14 @@ async function reverseWeb(request, target, targetPath, env, ctx) {
 
   const modifiedRequest = new Request(targetUrl, request);
   modifiedRequest.headers.set("X-Forwarded-Host", request.headers.get("Host") || "");
-
   const response = await fetch(modifiedRequest);
   const newResponse = new Response(response.body, response);
-
-  // Tambah CORS header
   for (const [key, value] of Object.entries(CORS_HEADER_OPTIONS)) {
     newResponse.headers.set(key, value);
   }
   newResponse.headers.set("X-Proxied-By", "Worker");
-  
-  // ✅ Update traffic stats untuk reverse proxy
-  const contentLength = response.headers.get("content-length");
-  const responseSize = contentLength ? parseInt(contentLength) : 0;
-
-  ctx.waitUntil(updateTrafficStats(request, responseSize, env));
-
   return newResponse;
 }
-
 
 /* =======================
    WEBSOCKET HANDLER + TCP/UDP logic
@@ -803,210 +706,6 @@ function serveUI() {
     .header h1 { font-size:2.8rem; margin-bottom:10px; background: linear-gradient(90deg,#00dbde,#fc00ff); -webkit-background-clip:text; -webkit-text-fill-color:transparent; font-weight:800; }
     .header p { font-size:1.2rem; opacity:0.9; max-width:600px; margin:0 auto; }
     .badge { display:inline-block; background:var(--primary); color:white; padding:4px 12px; border-radius:20px; font-size:0.8rem; font-weight:600; margin-left:10px; }
-    
-    /* Digital Clock Styles */
-    .digital-clock { margin: 15px 0; font-family: 'Courier New', monospace; }
-    .clock-container { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; }
-    .time-zone { background: rgba(255,255,255,0.1); padding: 10px 20px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.2); }
-    .time-label { font-size: 0.9rem; opacity: 0.8; margin-bottom: 5px; }
-    .time-value { font-size: 1.4rem; font-weight: bold; color: #00dbde; text-shadow: 0 0 10px rgba(0,219,222,0.5); }
-    
-    /* Running Text Styles */
-    .running-text-container {
-      background: rgba(0,0,0,0.3);
-      border-radius: 12px;
-      padding: 15px;
-      margin-top: 15px;
-      border: 1px solid rgba(255,255,255,0.1);
-      overflow: hidden;
-      position: relative;
-      height: 60px;
-    }
-
-    .running-text {
-      position: absolute;
-      white-space: nowrap;
-      color: #00dbde;
-      font-weight: 600;
-      font-size: 1.1rem;
-      text-shadow: 0 0 10px rgba(0,219,222,0.5);
-      animation: runText 25s linear infinite;
-    }
-
-    .running-text-item {
-      display: inline-block;
-      margin: 0 30px;
-      padding: 5px 15px;
-      background: rgba(0,219,222,0.1);
-      border-radius: 8px;
-      border: 1px solid rgba(0,219,222,0.3);
-    }
-
-    @keyframes runText {
-      0% {
-        transform: translateX(100%);
-      }
-      100% {
-        transform: translateX(-100%);
-      }
-    }
-
-    .traffic-stats-mini {
-      display: flex;
-      gap: 15px;
-      margin-top: 10px;
-      flex-wrap: wrap;
-      justify-content: center;
-    }
-
-    .traffic-mini-item {
-      background: rgba(255,255,255,0.05);
-      padding: 8px 15px;
-      border-radius: 8px;
-      font-size: 0.9rem;
-      border: 1px solid rgba(255,255,255,0.1);
-    }
-
-    .traffic-mini-value {
-      color: #00dbde;
-      font-weight: bold;
-      margin-left: 5px;
-    }
-
-    /* Wildcard Input Styles */
-    .wildcard-input-container {
-      background: rgba(255,255,255,0.05);
-      border-radius: 10px;
-      padding: 15px;
-      margin-top: 15px;
-      border: 1px solid rgba(255,255,255,0.1);
-    }
-
-    .wildcard-input-group {
-      display: flex;
-      gap: 10px;
-      align-items: center;
-    }
-
-    .wildcard-input {
-      flex: 1;
-      background: rgba(0,0,0,0.3);
-      border: 1px solid rgba(255,255,255,0.2);
-      border-radius: 8px;
-      padding: 10px 15px;
-      color: white;
-      font-size: 0.9rem;
-    }
-
-    .wildcard-input:focus {
-      outline: none;
-      border-color: #00dbde;
-      box-shadow: 0 0 10px rgba(0,219,222,0.3);
-    }
-
-    .wildcard-btn {
-      background: linear-gradient(90deg, #00dbde, #fc00ff);
-      border: none;
-      border-radius: 8px;
-      padding: 10px 20px;
-      color: white;
-      cursor: pointer;
-      font-weight: 600;
-      transition: all 0.3s ease;
-    }
-
-    .wildcard-btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 5px 15px rgba(0,219,222,0.4);
-    }
-
-    .wildcard-example {
-      font-size: 0.8rem;
-      color: rgba(255,255,255,0.6);
-      margin-top: 8px;
-      text-align: center;
-    }
-    
-    /* Popup Banner Styles */
-    .popup-overlay {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0,0,0,0.8);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      z-index: 9999;
-      backdrop-filter: blur(10px);
-    }
-    .popup-banner {
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-      padding: 40px;
-      border-radius: 20px;
-      text-align: center;
-      border: 2px solid #00dbde;
-      box-shadow: 0 0 50px rgba(0,219,222,0.5);
-      max-width: 500px;
-      width: 90%;
-      position: relative;
-      animation: glow 2s infinite alternate;
-    }
-    @keyframes glow {
-      from { box-shadow: 0 0 30px rgba(0,219,222,0.5); }
-      to { box-shadow: 0 0 60px rgba(0,219,222,0.8); }
-    }
-    .popup-title {
-      font-size: 2.5rem;
-      background: linear-gradient(90deg, #00dbde, #fc00ff);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      margin-bottom: 20px;
-      font-weight: 800;
-      text-shadow: 0 0 20px rgba(0,219,222,0.5);
-    }
-    .popup-subtitle {
-      font-size: 1.2rem;
-      color: #00dbde;
-      margin-bottom: 30px;
-      opacity: 0.9;
-    }
-    .popup-close {
-      position: absolute;
-      top: 15px;
-      right: 20px;
-      background: none;
-      border: none;
-      color: #00dbde;
-      font-size: 1.5rem;
-      cursor: pointer;
-      transition: color 0.3s;
-    }
-    .popup-close:hover {
-      color: #fc00ff;
-    }
-    .popup-content {
-      font-size: 1rem;
-      line-height: 1.6;
-      margin-bottom: 20px;
-      color: rgba(255,255,255,0.8);
-    }
-    .sound-control {
-      margin-top: 20px;
-      padding: 10px 20px;
-      background: linear-gradient(90deg, #00dbde, #fc00ff);
-      border: none;
-      border-radius: 10px;
-      color: white;
-      cursor: pointer;
-      font-weight: 600;
-      transition: transform 0.3s;
-    }
-    .sound-control:hover {
-      transform: scale(1.05);
-    }
-    
     .dashboard { display:grid; grid-template-columns: repeat(auto-fit, minmax(350px,1fr)); gap:25px; margin-bottom:40px; }
     .card { background: rgba(255,255,255,0.07); border-radius:16px; padding:25px; backdrop-filter: blur(10px); border:1px solid rgba(255,255,255,0.1); transition:all .3s ease; box-shadow: 0 8px 32px rgba(0,0,0,0.1); }
     .card:hover { transform: translateY(-5px); box-shadow: 0 15px 30px rgba(0,0,0,0.2); border-color: rgba(255,255,255,0.2); }
@@ -1039,66 +738,25 @@ function serveUI() {
     .proxy-active { border-left:4px solid var(--success); }
     .proxy-status { font-size:0.8rem; padding:4px 10px; border-radius:20px; font-weight:600; }
     .footer { text-align:center; margin-top:50px; padding:25px; opacity:0.7; font-size:0.9rem; border-top:1px solid rgba(255,255,255,0.1); }
-    .credit { margin-top: 10px; font-size: 0.8rem; color: rgba(255,255,255,0.6); }
-    .credit a { color: #00dbde; text-decoration: none; }
-    .credit a:hover { text-decoration: underline; }
     .loading { display:inline-block; width:20px; height:20px; border:3px solid rgba(255,255,255,0.3); border-radius:50%; border-top-color:#fff; animation:spin 1s ease-in-out infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .notification { position: fixed; top:20px; right:20px; padding:15px 20px; background:var(--success); color:white; border-radius:10px; box-shadow:0 5px 15px rgba(0,0,0,0.2); transform: translateX(150%); transition: transform .3s ease; z-index:1000; }
     .notification.show { transform: translateX(0); }
     .progress-bar { height:6px; background: rgba(255,255,255,0.1); border-radius:3px; margin-top:10px; overflow:hidden; }
     .progress-fill { height:100%; background: linear-gradient(90deg,#00dbde,#fc00ff); border-radius:3px; width:0%; transition:width .3s ease; }
-    @media (max-width:768px) { .dashboard { grid-template-columns: 1fr; } .header h1 { font-size:2.2rem; } .actions { flex-direction:column; } .btn { width:100%; justify-content:center; } .clock-container { gap: 10px; } .time-value { font-size: 1.1rem; } .popup-title { font-size: 2rem; } .popup-banner { padding: 20px; } .running-text { font-size: 0.9rem; } .running-text-item { margin: 0 15px; padding: 3px 10px; } .wildcard-input-group { flex-direction: column; } .wildcard-btn { width: 100%; } }
+    @media (max-width:768px) { .dashboard { grid-template-columns: 1fr; } .header h1 { font-size:2.2rem; } .actions { flex-direction:column; } .btn { width:100%; justify-content:center; } }
   </style>
 </head>
 <body>
-  <!-- Popup Banner -->
-  <div class="popup-overlay" id="popupBanner">
-    <div class="popup-banner">
-      <button class="popup-close" id="closePopup">&times;</button>
-      <div class="popup-title">ANDRE CELL</div>
-      <div class="popup-subtitle">PRESENTS</div>
-      <div class="popup-content">
-        <p>Welcome to ${atob(judul)} Worker - Premium Proxy Service</p>
-        <p>Powered by advanced technology and secured connections</p>
-        <p style="margin-top: 15px; color: #00dbde; font-weight: 600;">FEATURING:</p>
-        <p>• Auto Bank Proxy Rotation<br>• Real-time Monitoring<br>• Secure UUID Generation<br>• High-Speed Connections</p>
-      </div>
-      <button class="sound-control" id="toggleSound">
-        <i class="fas fa-volume-mute"></i> Toggle Background Sound
-      </button>
-    </div>
-  </div>
-
   <div class="container">
     <div class="header">
       <h1><i class="fas fa-shield-alt"></i> ${atob(judul)} WORKER</h1>
       <p>Auto Bank Proxy System dengan UUID Otomatis dan Monitoring Real-time</p>
-      
-      <!-- Digital Clock -->
-      <div class="digital-clock">
-        <div class="clock-container">
-          <div class="time-zone">
-            <div class="time-label">WIB (Jakarta)</div>
-            <div class="time-value" id="wib-time">00:00:00</div>
-          </div>
-          <div class="time-zone">
-            <div class="time-label">WITA (Makassar)</div>
-            <div class="time-value" id="wita-time">00:00:00</div>
-          </div>
-          <div class="time-zone">
-            <div class="time-label">WIT (Jayapura)</div>
-            <div class="time-value" id="wit-time">00:00:00</div>
-          </div>
-        </div>
-      </div>
-      
       <div style="margin-top:15px;">
         <span class="badge">Auto Proxy</span>
         <span class="badge">UUID Generator</span>
         <span class="badge">Real-time Ping</span>
         <span class="badge">Bank Proxy</span>
-        <span class="badge">Traffic Monitor</span>
       </div>
     </div>
 
@@ -1126,19 +784,6 @@ function serveUI() {
               <span class="status-indicator status-active"></span>
               <span id="status-text">Active</span>
             </span>
-          </div>
-        </div>
-
-        <!-- Wildcard Input Section -->
-        <div class="wildcard-input-container">
-          <div class="wildcard-input-group">
-            <input type="text" class="wildcard-input" id="wildcard-input" placeholder="Masukkan wildcard bug (contoh: bug.com)" value="bug.com">
-            <button class="wildcard-btn" id="apply-wildcard-btn">
-              <i class="fas fa-check"></i> Apply
-            </button>
-          </div>
-          <div class="wildcard-example">
-            Contoh: bug.com, example.com, domain.local
           </div>
         </div>
 
@@ -1209,213 +854,17 @@ function serveUI() {
           <button class="btn btn-secondary" id="refresh-proxies-btn"><i class="fas fa-redo"></i> Refresh Proxies</button>
         </div>
       </div>
-
-      <!-- Traffic Monitoring Card with Running Text -->
-      <div class="card">
-        <div class="card-header">
-          <i class="fas fa-chart-bar"></i>
-          <h3>Monitoring Trafik & Bandwidth</h3>
-        </div>
-
-        <div class="info-grid">
-          <div class="info-item">
-            <span class="info-label"><i class="fas fa-users"></i> Total Pengunjung:</span>
-            <span class="info-value" id="total-visitors">0</span>
-          </div>
-
-          <div class="info-item">
-            <span class="info-label"><i class="fas fa-user-clock"></i> Pengunjung Hari Ini:</span>
-            <span class="info-value" id="today-visitors">0</span>
-          </div>
-
-          <div class="info-item">
-            <span class="info-label"><i class="fas fa-database"></i> Total Bandwidth:</span>
-            <span class="info-value" id="total-bandwidth">0 MB</span>
-          </div>
-
-          <div class="info-item">
-            <span class="info-label"><i class="fas fa-bolt"></i> Bandwidth Hari Ini:</span>
-            <span class="info-value" id="today-bandwidth">0 MB</span>
-          </div>
-        </div>
-
-        <!-- Running Text Display -->
-        <div class="running-text-container">
-          <div class="running-text" id="running-text">
-            <!-- Content akan diisi oleh JavaScript -->
-          </div>
-        </div>
-
-        <!-- Mini Stats -->
-        <div class="traffic-stats-mini">
-          <div class="traffic-mini-item">
-            <i class="fas fa-eye"></i> Views: <span class="traffic-mini-value" id="mini-total-visitors">0</span>
-          </div>
-          <div class="traffic-mini-item">
-            <i class="fas fa-calendar-day"></i> Today: <span class="traffic-mini-value" id="mini-today-visitors">0</span>
-          </div>
-          <div class="traffic-mini-item">
-            <i class="fas fa-network-wired"></i> Total BW: <span class="traffic-mini-value" id="mini-total-bandwidth">0MB</span>
-          </div>
-          <div class="traffic-mini-item">
-            <i class="fas fa-tachometer-alt"></i> Today BW: <span class="traffic-mini-value" id="mini-today-bandwidth">0MB</span>
-          </div>
-        </div>
-
-        <!-- Tombol Refresh Traffic dan Reset Data dihapus -->
-      </div>
     </div>
 
     <div class="footer">
       <p>${atob(judul)} Worker • Auto Bank Proxy System • Real-time Monitoring</p>
-      <div class="credit">
-        <p>Dipersembahkan oleh <strong>ANDRE CELL</strong> | Powered by <a href="https://github.com/megawanted" target="_blank">@megawanted</a></p>
-      </div>
       <p style="margin-top:10px; font-size:0.8rem;">System secara otomatis menghasilkan proxy bank dan UUID untuk koneksi yang aman</p>
     </div>
   </div>
 
   <div class="notification" id="notification"><span id="notification-text">Berhasil disalin!</span></div>
 
-  <!-- Audio Element untuk Backsound -->
-  <audio id="backgroundSound" loop>
-    <source src="https://assets.mixkit.co/active_storage/sfx/251/251-preview.mp3" type="audio/mpeg">
-    <source src="https://assets.mixkit.co/active_storage/sfx/251/251-preview.ogg" type="audio/ogg">
-  </audio>
-
 <script>
-  // Backsound dan Popup Functions
-  const backgroundSound = document.getElementById('backgroundSound');
-  const popupBanner = document.getElementById('popupBanner');
-  const closePopup = document.getElementById('closePopup');
-  const toggleSound = document.getElementById('toggleSound');
-  let isSoundPlaying = false;
-
-  // Show popup on page load
-  window.addEventListener('load', function() {
-    setTimeout(() => {
-      popupBanner.style.display = 'flex';
-      // Auto play sound after 2 seconds
-      setTimeout(() => {
-        playScarySound();
-      }, 2000);
-    }, 1000);
-  });
-
-  // Close popup
-  closePopup.addEventListener('click', function() {
-    popupBanner.style.display = 'none';
-  });
-
-  // Toggle sound
-  toggleSound.addEventListener('click', function() {
-    if (isSoundPlaying) {
-      backgroundSound.pause();
-      toggleSound.innerHTML = '<i class="fas fa-volume-mute"></i> Play Background Sound';
-    } else {
-      playScarySound();
-      toggleSound.innerHTML = '<i class="fas fa-volume-up"></i> Stop Background Sound';
-    }
-    isSoundPlaying = !isSoundPlaying;
-  });
-
-  function playScarySound() {
-    backgroundSound.volume = 0.3;
-    backgroundSound.play().catch(e => {
-      console.log('Audio play failed:', e);
-      // Fallback sound
-      const fallbackSound = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==');
-      fallbackSound.volume = 0.2;
-      fallbackSound.loop = true;
-      fallbackSound.play();
-    });
-  }
-
-  // Digital Clock Function
-  function updateDigitalClock() {
-    const now = new Date();
-    
-    // WIB (Jakarta) UTC+7
-    const wibTime = new Date(now.getTime() + (7 * 60 * 60 * 1000));
-    document.getElementById('wib-time').textContent = wibTime.toUTCString().split(' ')[4];
-    
-    // WITA (Makassar) UTC+8
-    const witaTime = new Date(now.getTime() + (8 * 60 * 60 * 1000));
-    document.getElementById('wita-time').textContent = witaTime.toUTCString().split(' ')[4];
-    
-    // WIT (Jayapura) UTC+9
-    const witTime = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-    document.getElementById('wit-time').textContent = witTime.toUTCString().split(' ')[4];
-  }
-
-  // Update clock every second
-  setInterval(updateDigitalClock, 1000);
-  updateDigitalClock();
-
-  // Traffic Monitoring Functions
-  async function loadTrafficStats() {
-    try {
-      const response = await fetch('/traffic');
-      const data = await response.json();
-      
-      // Update UI dengan data traffic
-      document.getElementById('total-visitors').textContent = data.totalVisitors.toLocaleString();
-      document.getElementById('today-visitors').textContent = data.todayVisitors.toLocaleString();
-      document.getElementById('total-bandwidth').textContent = data.totalBandwidth;
-      document.getElementById('today-bandwidth').textContent = data.todayBandwidth;
-      
-      // Update mini stats
-      document.getElementById('mini-total-visitors').textContent = data.totalVisitors.toLocaleString();
-      document.getElementById('mini-today-visitors').textContent = data.todayVisitors.toLocaleString();
-      document.getElementById('mini-total-bandwidth').textContent = data.totalBandwidth;
-      document.getElementById('mini-today-bandwidth').textContent = data.todayBandwidth;
-      
-      // Update running text
-      updateRunningText(data);
-      
-    } catch (error) {
-      console.error('Error loading traffic stats:', error);
-    }
-  }
-
-  // Fungsi untuk update running text
-  function updateRunningText(data) {
-    const runningText = document.getElementById('running-text');
-    
-    const messages = [
-      \`🚀 \${atob(judul)} Worker - Total Pengunjung: \${data.totalVisitors.toLocaleString()} orang\`,
-      \`📊 Pengunjung Hari Ini: \${data.todayVisitors.toLocaleString()} orang\`,
-      \`💾 Total Bandwidth Digunakan: \${data.totalBandwidth}\`,
-      \`⚡ Bandwidth Hari Ini: \${data.todayBandwidth}\`,
-      \`🔒 Koneksi Aman - Powered by ANDRE CELL\`,
-      \`🌐 System Online - Real-time Monitoring Aktif\`,
-      \`🔄 Auto Proxy Rotation - Bank Proxy Terjamin\`,
-      \`📈 Traffic Monitoring - \${data.todayVisitors} visitors today\`
-    ];
-
-    // Buat elemen untuk setiap pesan
-    runningText.innerHTML = '';
-    messages.forEach((message, index) => {
-      const span = document.createElement('span');
-      span.className = 'running-text-item';
-      span.textContent = message;
-      runningText.appendChild(span);
-      
-      // Tambah pemisah kecuali untuk item terakhir
-      if (index < messages.length - 1) {
-        const separator = document.createElement('span');
-        separator.innerHTML = ' • ';
-        separator.style.color = '#fc00ff';
-        separator.style.margin = '0 10px';
-        runningText.appendChild(separator);
-      }
-    });
-    
-    // Duplicate content untuk efek seamless
-    const clone = runningText.cloneNode(true);
-    runningText.parentNode.appendChild(clone);
-  }
-
   // Elements
   const uuidValue = document.getElementById('uuid-value');
   const proxyValue = document.getElementById('proxy-value');
@@ -1431,8 +880,6 @@ function serveUI() {
   const proxyList = document.getElementById('proxy-list');
   const notification = document.getElementById('notification');
   const notificationText = document.getElementById('notification-text');
-  const wildcardInput = document.getElementById('wildcard-input');
-  const applyWildcardBtn = document.getElementById('apply-wildcard-btn');
 
   // Buttons
   const refreshBtn = document.getElementById('refresh-btn');
@@ -1447,26 +894,23 @@ function serveUI() {
   let autoPingInterval = null;
   let startTime = Date.now();
   let currentConfig = null;
-  let currentDomain = 'bug.com';
 
   function formatDuration(ms) {
-    const seconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
-    
-    if (hours > 0) {
-      return hours + "h " + (minutes % 60) + "m";
-    } else if (minutes > 0) {
-      return minutes + "m " + (seconds % 60) + "s";
-    } else {
-      return seconds + "s";
-    }
-  }
-
+            const seconds = Math.floor(ms / 1000);
+            const minutes = Math.floor(seconds / 60);
+            const hours = Math.floor(minutes / 60);
+            
+            if (hours > 0) {
+                return \`\${hours}h \${minutes % 60}m\`;
+            } else if (minutes > 0) {
+                return \`\${minutes}m \${seconds % 60}s\`;
+            } else {
+                return \`\${seconds}s\`;
+            }
+        }
   function updateUptime() {
     uptimeValue.textContent = formatDuration(Date.now() - startTime);
   }
-
   function showNotification(message, type='success') {
     notificationText.textContent = message;
     notification.className = 'notification show';
@@ -1474,90 +918,72 @@ function serveUI() {
     setTimeout(()=> notification.classList.remove('show'), 3000);
   }
 
-  // Load config dari backend dengan domain
-  async function loadConfig(domain = '') {
-    try {
-      configProgress.style.width = '30%';
-      const domainParam = domain || currentDomain;
-      const res = await fetch('/sub?domain=' + domainParam);
-      const text = await res.text();
-      configProgress.style.width = '70%';
+  // Load config dari backend
+  async function loadConfig() {
+  try {
+    configProgress.style.width = '30%';
+    const domain = location.hostname || '';
+    const res = await fetch('/sub?domain=');
+    const text = await res.text();
+    configProgress.style.width = '70%';
 
-      let data;
-      try { data = JSON.parse(text); } catch(e) { data = { error: text }; }
-      configProgress.style.width = '90%';
+    let data;
+    try { data = JSON.parse(text); } catch(e) { data = { error: text }; }
+    configProgress.style.width = '90%';
 
-      if (data && !data.error) {
-        uuidValue.textContent = data.uuid || 'n/a';
-        proxyValue.textContent = data.ip + ':' + data.port + ' (' + (data.org || data.country || 'Unknown') + ')';
+    if (data && !data.error) {
+      uuidValue.textContent = data.uuid || 'n/a';
+      proxyValue.textContent = data.ip + ':' + data.port + ' (' + (data.org || data.country || 'Unknown') + ')';
 
-        activeProxy.textContent = proxyValue.textContent;
+      activeProxy.textContent = proxyValue.textContent;
 
-        // ambil string vless dari config_vls (hindari [object Object])
-        if (data.config_vls && typeof data.config_vls === "object") {
-          const firstKey = Object.keys(data.config_vls)[0];
-          configBox.textContent = data.config_vls[firstKey];
-          currentConfig = data.config_vls[firstKey];
-        } else {
-          configBox.textContent = data.config_vls || JSON.stringify(data, null, 2);
-          currentConfig = configBox.textContent;
-        }
-
-        // pool count dari SG + ID
-        const [sgRes, idRes] = await Promise.all([fetch('/SG.txt'), fetch('/ID.txt')]);
-        let sgList = [], idList = [];
-        try { sgList = await sgRes.json(); } catch(e){}
-        try { idList = await idRes.json(); } catch(e){}
-        proxyCount.textContent = (sgList.length + idList.length) + ' proxies available';
-
-        // tampilkan list proxy
-        proxyList.innerHTML = '';
-        [...sgList, ...idList].forEach(p => {
-          const div = document.createElement('div');
-          div.className = 'proxy-item proxy-inactive';
-          div.innerHTML = '<span>' + p.prxIP + ':' + p.prxPort + ' - ' + (p.org || p.country || '') + '</span><span class="proxy-status">Inactive</span>';
-
-          if (p.prxIP === data.ip && String(p.prxPort) === String(data.port)) {
-            div.classList.remove('proxy-inactive');
-            div.classList.add('proxy-active');
-            div.querySelector('.proxy-status').textContent = 'Active';
-          }
-          proxyList.appendChild(div);
-        });
-
-        // test ping
-        await testPing({ ip: data.ip, port: data.port });
+      // ✅ ambil string vless dari config_vls (hindari [object Object])
+      if (data.config_vls && typeof data.config_vls === "object") {
+        const firstKey = Object.keys(data.config_vls)[0]; // misal "vless"
+        configBox.textContent = data.config_vls[firstKey];
+        currentConfig = data.config_vls[firstKey];
       } else {
-        configBox.textContent = 'No config (error)';
-        showNotification('No config returned', 'error');
+        configBox.textContent = data.config_vls || JSON.stringify(data, null, 2);
+        currentConfig = configBox.textContent;
       }
 
-      setTimeout(()=> configProgress.style.width = '0%', 1000);
-    } catch (err) {
-      console.error(err);
-      configBox.textContent = 'Error loading configuration';
-      showNotification('Error loading configuration', 'error');
+      // pool count dari SG + ID
+      const [sgRes, idRes] = await Promise.all([fetch('/SG.txt'), fetch('/ID.txt')]);
+      let sgList = [], idList = [];
+      try { sgList = await sgRes.json(); } catch(e){}
+      try { idList = await idRes.json(); } catch(e){}
+      proxyCount.textContent = (sgList.length + idList.length) + ' proxies available';
+
+      // tampilkan list proxy
+      proxyList.innerHTML = '';
+      [...sgList, ...idList].forEach(p => {
+        const div = document.createElement('div');
+        div.className = 'proxy-item proxy-inactive';
+        div.innerHTML = '<span>' + p.prxIP + ':' + p.prxPort + ' - ' + (p.org || p.country || '') + '</span><span class="proxy-status">Inactive</span>';
+
+        if (p.prxIP === data.ip && String(p.prxPort) === String(data.port)) {
+          div.classList.remove('proxy-inactive');
+          div.classList.add('proxy-active');
+          div.querySelector('.proxy-status').textContent = 'Active';
+        }
+        proxyList.appendChild(div);
+      });
+
+      // test ping
+      await testPing({ ip: data.ip, port: data.port });
+    } else {
+      configBox.textContent = 'No config (error)';
+      showNotification('No config returned', 'error');
     }
+
+    setTimeout(()=> configProgress.style.width = '0%', 1000);
+  } catch (err) {
+    console.error(err);
+    configBox.textContent = 'Error loading configuration';
+    showNotification('Error loading configuration', 'error');
   }
+}
 
-  // Apply wildcard bug
-  function applyWildcard() {
-    const domain = wildcardInput.value.trim();
-    if (!domain) {
-      showNotification('Masukkan domain wildcard!', 'error');
-      return;
-    }
-
-    // Validasi domain sederhana
-    if (!domain.includes('.') || domain.length < 3) {
-      showNotification('Format domain tidak valid!', 'error');
-      return;
-    }
-
-    currentDomain = domain;
-    showNotification('Wildcard bug diterapkan: ' + domain, 'success');
-    loadConfig(domain);
-  }
 
   // Ping pakai /health
   async function testPing(proxy) {
@@ -1581,16 +1007,9 @@ function serveUI() {
       let latency = (data && typeof data.delay !== 'undefined') ? Number(data.delay) : null;
       if (latency !== null && !isNaN(latency)) {
         pingValue.textContent = latency;
-        if (latency < 100) { 
-          pingValue.className = 'ping-value ping-good'; 
-          pingStatus.textContent = 'ms (Excellent)'; 
-        } else if (latency < 300) { 
-          pingValue.className = 'ping-value ping-medium'; 
-          pingStatus.textContent = 'ms (Good)'; 
-        } else { 
-          pingValue.className = 'ping-value ping-bad'; 
-          pingStatus.textContent = 'ms (Slow)'; 
-        }
+        if (latency < 100) { pingValue.className = 'ping-value ping-good'; pingStatus.textContent = 'ms (Excellent)'; }
+        else if (latency < 300) { pingValue.className = 'ping-value ping-medium'; pingStatus.textContent = 'ms (Good)'; }
+        else { pingValue.className = 'ping-value ping-bad'; pingStatus.textContent = 'ms (Slow)'; }
       } else {
         pingValue.textContent = 'N/A';
         pingValue.className = 'ping-value ping-bad';
@@ -1621,7 +1040,7 @@ function serveUI() {
     } else {
       const parts = (activeProxy.textContent || '').split(':');
       const ip = parts[0];
-      const port = parts[1] ? parts[1].split(' ')[0] : '443';
+      const port = parts[1] ? parts[1].split(' ')[0] : '443'; // buang "(ORG)" setelah port
       testPing({ ip, port });
       autoPingInterval = setInterval(() => testPing({ ip, port }), 5000);
       autoPingBtn.innerHTML = '<i class="fas fa-stop"></i> Stop Auto Ping';
@@ -1644,7 +1063,7 @@ function serveUI() {
   // Rotate proxy
   async function rotateProxy() {
     rotateProxyBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Rotating...';
-    await loadConfig(currentDomain);
+    await loadConfig();
     showNotification('Proxy rotated successfully!');
     rotateProxyBtn.innerHTML = '<i class="fas fa-random"></i> Rotate Proxy';
   }
@@ -1652,15 +1071,15 @@ function serveUI() {
   // Refresh proxies
   async function refreshProxies() {
     refreshProxiesBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
-    await loadConfig(currentDomain);
+    await loadConfig();
     showNotification('Proxy list refreshed!');
     refreshProxiesBtn.innerHTML = '<i class="fas fa-redo"></i> Refresh Proxies';
   }
 
   // Event listeners
-  refreshBtn.addEventListener('click', () => loadConfig(currentDomain));
+  refreshBtn.addEventListener('click', loadConfig);
   copyBtn.addEventListener('click', copyConfig);
-  generateVlessBtn.addEventListener('click', () => loadConfig(currentDomain));
+  generateVlessBtn.addEventListener('click', loadConfig);
   pingBtn.addEventListener('click', () => {
     const parts = (activeProxy.textContent || '').split(':');
     const ip = parts[0];
@@ -1670,19 +1089,9 @@ function serveUI() {
   autoPingBtn.addEventListener('click', toggleAutoPing);
   rotateProxyBtn.addEventListener('click', rotateProxy);
   refreshProxiesBtn.addEventListener('click', refreshProxies);
-  applyWildcardBtn.addEventListener('click', applyWildcard);
-  
-  // Enter key untuk wildcard input
-  wildcardInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-      applyWildcard();
-    }
-  });
 
   // Initial load
-  loadConfig(currentDomain);
-  loadTrafficStats(); // Load traffic stats on page load
-  
+  loadConfig();
   setTimeout(() => {
     const parts = (activeProxy.textContent || '').split(':');
     const ip = parts[0];
@@ -1691,8 +1100,6 @@ function serveUI() {
   }, 1000);
 
   setInterval(updateUptime, 1000);
-  // Auto refresh traffic stats every 30 seconds
-  setInterval(loadTrafficStats, 30000);
 </script>
 
 </body>
@@ -1703,23 +1110,6 @@ function serveUI() {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-cache, no-store, must-revalidate"
     }
-  });
-}
-
-/* =======================
-   TRAFFIC STATS ENDPOINT
-   ======================= */
-async function serveTrafficStats(request, env) {
-  await loadTrafficStats(env);
-  const stats = {
-    totalVisitors: trafficStats.totalVisitors,
-    todayVisitors: trafficStats.todayVisitors,
-    totalBandwidth: formatBytes(trafficStats.bandwidthUsed),
-    todayBandwidth: formatBytes(trafficStats.todayBandwidth),
-    lastReset: trafficStats.lastReset
-  };
-  return new Response(JSON.stringify(stats), {
-    headers: { "Content-Type": "application/json" }
   });
 }
 
@@ -1766,111 +1156,79 @@ export default {
       const pathname = url.pathname;
       const upgradeHeader = request.headers.get("Upgrade");
 
-      // Update traffic stats untuk semua request (kecuali WebSocket)
-      if (upgradeHeader !== "websocket") {
-        // Estimate response size untuk tracking
-        const originalResponse = await this.handleRequest(request, env, ctx);
-        const contentLength = originalResponse.headers.get("content-length");
-        let responseSize = contentLength ? parseInt(contentLength) : 0;
-
-        // Kalau tidak ada content-length, coba hitung isi response
-        if (!responseSize) {
-          try {
-            const body = await originalResponse.clone().text();
-            responseSize = new TextEncoder().encode(body).length;
-          } catch (_) {
-            responseSize = 0;
-          }
-        }
-
-        // ✅ perbaikan: sertakan env + ctx.waitUntil
-        ctx.waitUntil(updateTrafficStats(request, responseSize, env));
-
-        return originalResponse;
+      // CORS preflight
+      if (request.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: CORS_HEADER_OPTIONS });
       }
 
-      return await this.handleRequest(request, env, ctx);
+      // Root -> UI (exact UI from worker 4)
+      if (pathname === "/") {
+        return serveUI();
+      }
+      
+      // route: /health?ip=1.2.3.4&port=443
+// === Route: /health?ip=IP:PORT ===
+if (pathname === "/health") {
+  const ipPort = url.searchParams.get("ip"); // contoh: "138.2.89.64:32962"
+  if (!ipPort) {
+    return new Response(JSON.stringify({ error: "missing_ip" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // pisahkan jadi ip dan port
+  const [ip, port] = ipPort.split(":");
+
+  const result = await checkPrxHealth(ip, port || "443");
+  return new Response(JSON.stringify(result, null, 2), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+
+
+
+
+      // Expose SG/ID lists for UI
+      if (pathname === "/SG.txt") {
+        return await servePrxList("SG");
+      }
+      if (pathname === "/ID.txt") {
+        return await servePrxList("ID");
+      }
+
+      // /sub -> single rotated config from SG+ID (accept ?domain=...)
+      if (pathname.startsWith("/sub")) {
+  const params = Object.fromEntries(url.searchParams.entries());
+  const out = await generateSubscription(params, request);  // ✅ kirim request
+  return new Response(out, {
+    status: 200,
+    headers: { "Content-Type": "application/json; charset=utf-8", ...CORS_HEADER_OPTIONS },
+  });
+}
+
+
+      // /ping used by UI
+      if (pathname === "/ping") {
+        return servePing();
+      }
+
+      // WebSocket upgrade handler (proxying TCP/UDP via sockets)
+      if (upgradeHeader === "websocket") {
+        return await websocketHandler(request);
+      }
+
+      // Default: simple reverse proxy
+      const targetReversePrx = (env && env.REVERSE_PRX_TARGET) || "example.com";
+      return await reverseWeb(request, targetReversePrx);
+
     } catch (err) {
       return new Response(`An error occurred: ${err.toString()}`, {
         status: 500,
         headers: { ...CORS_HEADER_OPTIONS },
       });
     }
-  },
-
-  async handleRequest(request, env, ctx) {
-    const url = new URL(request.url);
-    const pathname = url.pathname;
-    const upgradeHeader = request.headers.get("Upgrade");
-
-    // CORS preflight
-    if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: CORS_HEADER_OPTIONS });
-    }
-
-    // Root -> UI
-    if (pathname === "/") {
-      return serveUI();
-    }
-
-    // Statistik
-    if (pathname === "/traffic") {
-      return await serveTrafficStats(request, env);
-      return new Response(JSON.stringify(stats, null, 2), {
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    // Health check
-    if (pathname === "/health") {
-      const ipPort = url.searchParams.get("ip");
-      if (!ipPort) {
-        return new Response(JSON.stringify({ error: "missing_ip" }), {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      const [ip, port] = ipPort.split(":");
-      const result = await checkPrxHealth(ip, port || "443");
-      return new Response(JSON.stringify(result, null, 2), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    // Expose proxy list
-    if (pathname === "/SG.txt") {
-      return await servePrxList("SG");
-    }
-    if (pathname === "/ID.txt") {
-      return await servePrxList("ID");
-    }
-
-    // Subscription
-    if (pathname.startsWith("/sub")) {
-      const params = Object.fromEntries(url.searchParams.entries());
-      const out = await generateSubscription(params, request);
-      return new Response(out, {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          ...CORS_HEADER_OPTIONS,
-        },
-      });
-    }
-
-    // Ping
-    if (pathname === "/ping") {
-      return servePing();
-    }
-
-    // WebSocket
-    if (upgradeHeader === "websocket") {
-      return await websocketHandler(request);
-    }
-
-    // Default reverse proxy
-    const targetReversePrx = (env && env.REVERSE_PRX_TARGET) || "example.com";
-    return await reverseWeb(request, targetReversePrx, null, env, ctx);
   },
 };
