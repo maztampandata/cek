@@ -1625,7 +1625,7 @@ function serveUI() {
   // Traffic Monitoring Functions
   async function loadTrafficStats() {
     try {
-      const response = await fetch("/traffic?_=" + Date.now());
+      const response = await fetch('/traffic');
       const data = await response.json();
       
       // Update UI dengan data traffic
@@ -1966,11 +1966,10 @@ function serveUI() {
   }, 1000);
 
   setInterval(updateUptime, 1000);
-  // Auto refresh traffic stats every 5 seconds
-  setInterval(loadTrafficStats, 5000);
-  // Auto refresh visitor info every 5 seconds
-  setInterval(loadVisitorInfo, 5000);
-  
+  // Auto refresh traffic stats every 30 seconds
+  setInterval(loadTrafficStats, 30000);
+  // Auto refresh visitor info every 60 seconds
+  setInterval(loadVisitorInfo, 60000);
 </script>
 
 </body>
@@ -2145,14 +2144,6 @@ export default {
       });
     }
 
-    // Expose proxy list
-    if (pathname === "/SG.txt") {
-      return await servePrxList("SG");
-    }
-    if (pathname === "/ID.txt") {
-      return await servePrxList("ID");
-    }
-
     // Subscription
     if (pathname.startsWith("/sub")) {
       const params = Object.fromEntries(url.searchParams.entries());
@@ -2173,10 +2164,32 @@ export default {
 
     // WebSocket
     if (upgradeHeader === "websocket") {
-      return await websocketHandler(request);
+      let selectedPrxIP = null;
+      const prxMatch = url.pathname.match(/^\/(.+[:=-]\d+)$/);
+
+      if (url.pathname.length === 3 || url.pathname.includes(",")) {
+     
+        const prxKeys = url.pathname.replace("/", "").toUpperCase().split(",");
+        const prxKey = prxKeys[Math.floor(Math.random() * prxKeys.length)];
+        const kvPrx = await getKVPrxList();
+        if (kvPrx[prxKey] && kvPrx[prxKey].length) {
+          selectedPrxIP = kvPrx[prxKey][Math.floor(Math.random() * kvPrx[prxKey].length)];
+        }
+      } else if (prxMatch) {
+        selectedPrxIP = prxMatch[1];
+      }
+
+      if (selectedPrxIP) {
+        // Pass selectedPrxIP to websocketHandler if needed
+        prxIP = selectedPrxIP;
+        return await websocketHandler(request);
+      } else {
+        return new Response("Invalid proxy selection", { status: 400 });
+      }
     }
 
-    // Default reverse proxy
+
+  
     const targetReversePrx = (env && env.REVERSE_PRX_TARGET) || "example.com";
     return await reverseWeb(request, targetReversePrx, null, env, ctx);
   },
