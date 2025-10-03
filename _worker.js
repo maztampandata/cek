@@ -117,9 +117,7 @@ export default {
       const url = new URL(request.url);
       const upgradeHeader = request.headers.get("Upgrade");
 
-      // Gateway check
-     
-
+    
       // Handle prx client
       // Handle country-specific proxy files
       if (url.pathname.match(/^\/(\w{2})\.txt$/)) {
@@ -326,12 +324,13 @@ let prxList = await getPrxList(prxBankUrl);          // Filter CC
             };
           });
 
-          return new Response(finalResult, {
-            status: 200,
-            headers: {
-              ...CORS_HEADER_OPTIONS,
-            },
-          });
+          return new Response(JSON.stringify(formattedResult), {
+  status: 200,
+  headers: {
+    ...CORS_HEADER_OPTIONS,
+    "Content-Type": "application/json"
+  },
+});
         } else if (apiPath.startsWith("/myip")) {
           return new Response(
             JSON.stringify({
