@@ -257,7 +257,7 @@ async function generateSubscription(params, request) {
 /* =======================
    Reverse Web / Basic Proxy
    ======================= */
-async function reverseWeb(request, target, targetPath, env, ctx) {
+async function reverseWeb(request, target, targetPath) {
   const targetUrl = new URL(request.url);
   const targetChunk = (target || "example.com").split(":");
 
@@ -267,25 +267,20 @@ async function reverseWeb(request, target, targetPath, env, ctx) {
 
   const modifiedRequest = new Request(targetUrl, request);
   modifiedRequest.headers.set("X-Forwarded-Host", request.headers.get("Host") || "");
-
   const response = await fetch(modifiedRequest);
   const newResponse = new Response(response.body, response);
-
-  // Tambah CORS header
   for (const [key, value] of Object.entries(CORS_HEADER_OPTIONS)) {
     newResponse.headers.set(key, value);
   }
   newResponse.headers.set("X-Proxied-By", "Worker");
   
-  // ✅ Update traffic stats untuk reverse proxy
-  const contentLength = response.headers.get("content-length");
+  // Update traffic stats untuk reverse proxy
+  const contentLength = response.headers.get('content-length');
   const responseSize = contentLength ? parseInt(contentLength) : 0;
-
-  ctx.waitUntil(updateTrafficStats(request, responseSize, env));
-
+  updateTrafficStats(request, responseSize);
+  
   return newResponse;
 }
-
 
 /* =======================
    WEBSOCKET HANDLER + TCP/UDP logic
@@ -783,13 +778,16 @@ async function checkPrxHealth(prxIP, prxPort) {
 
 
 function serveUI() {
+  const decodedJudul = atob(judul);
+  const decodedFlash = atob(flash);
+  
   const html = `
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>${atob(judul)} Worker - Auto Bank Proxy</title>
+  <title>${decodedJudul} Worker - Auto Bank Proxy</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
     * { margin:0; padding:0; box-sizing:border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
@@ -871,6 +869,115 @@ function serveUI() {
       color: #00dbde;
       font-weight: bold;
       margin-left: 5px;
+    }
+
+    /* Visitor Info Styles */
+    .visitor-info-container {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+      margin-top: 20px;
+    }
+
+    .visitor-card {
+      background: rgba(255,255,255,0.05);
+      border-radius: 15px;
+      padding: 20px;
+      border: 1px solid rgba(255,255,255,0.1);
+      backdrop-filter: blur(10px);
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .visitor-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, #00dbde, #fc00ff);
+    }
+
+    .visitor-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 15px 30px rgba(0,0,0,0.3);
+      border-color: rgba(255,255,255,0.2);
+    }
+
+    .visitor-header {
+      display: flex;
+      align-items: center;
+      margin-bottom: 15px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .visitor-icon {
+      font-size: 1.5rem;
+      margin-right: 12px;
+      background: linear-gradient(90deg, #00dbde, #fc00ff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .visitor-title {
+      font-size: 1.2rem;
+      font-weight: 600;
+    }
+
+    .visitor-details {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .visitor-detail {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .visitor-detail:last-child {
+      border-bottom: none;
+    }
+
+    .visitor-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 500;
+      opacity: 0.9;
+    }
+
+    .visitor-value {
+      font-weight: 600;
+      font-family: 'Courier New', monospace;
+      background: rgba(0,0,0,0.3);
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .country-flag {
+      font-size: 1.2rem;
+      margin-right: 5px;
+    }
+
+    .ip-address {
+      color: #00dbde;
+      font-weight: bold;
+    }
+
+    .isp-name {
+      color: #fc00ff;
+    }
+
+    .location-info {
+      color: #10b981;
     }
 
     /* Wildcard Input Styles */
@@ -1048,7 +1155,21 @@ function serveUI() {
     .notification.show { transform: translateX(0); }
     .progress-bar { height:6px; background: rgba(255,255,255,0.1); border-radius:3px; margin-top:10px; overflow:hidden; }
     .progress-fill { height:100%; background: linear-gradient(90deg,#00dbde,#fc00ff); border-radius:3px; width:0%; transition:width .3s ease; }
-    @media (max-width:768px) { .dashboard { grid-template-columns: 1fr; } .header h1 { font-size:2.2rem; } .actions { flex-direction:column; } .btn { width:100%; justify-content:center; } .clock-container { gap: 10px; } .time-value { font-size: 1.1rem; } .popup-title { font-size: 2rem; } .popup-banner { padding: 20px; } .running-text { font-size: 0.9rem; } .running-text-item { margin: 0 15px; padding: 3px 10px; } .wildcard-input-group { flex-direction: column; } .wildcard-btn { width: 100%; } }
+    @media (max-width:768px) { 
+      .dashboard { grid-template-columns: 1fr; } 
+      .header h1 { font-size:2.2rem; } 
+      .actions { flex-direction:column; } 
+      .btn { width:100%; justify-content:center; } 
+      .clock-container { gap: 10px; } 
+      .time-value { font-size: 1.1rem; } 
+      .popup-title { font-size: 2rem; } 
+      .popup-banner { padding: 20px; } 
+      .running-text { font-size: 0.9rem; } 
+      .running-text-item { margin: 0 15px; padding: 3px 10px; } 
+      .wildcard-input-group { flex-direction: column; } 
+      .wildcard-btn { width: 100%; }
+      .visitor-info-container { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -1059,7 +1180,7 @@ function serveUI() {
       <div class="popup-title">ANDRE CELL</div>
       <div class="popup-subtitle">PRESENTS</div>
       <div class="popup-content">
-        <p>Welcome to ${atob(judul)} Worker - Premium Proxy Service</p>
+        <p>Welcome to ${decodedJudul} Worker - Premium Proxy Service</p>
         <p>Powered by advanced technology and secured connections</p>
         <p style="margin-top: 15px; color: #00dbde; font-weight: 600;">FEATURING:</p>
         <p>• Auto Bank Proxy Rotation<br>• Real-time Monitoring<br>• Secure UUID Generation<br>• High-Speed Connections</p>
@@ -1072,7 +1193,7 @@ function serveUI() {
 
   <div class="container">
     <div class="header">
-      <h1><i class="fas fa-shield-alt"></i> ${atob(judul)} WORKER</h1>
+      <h1><i class="fas fa-shield-alt"></i> ${decodedJudul} WORKER</h1>
       <p>Auto Bank Proxy System dengan UUID Otomatis dan Monitoring Real-time</p>
       
       <!-- Digital Clock -->
@@ -1148,7 +1269,7 @@ function serveUI() {
         <div class="actions">
           <button class="btn" id="refresh-btn"><i class="fas fa-sync-alt"></i> Refresh Config</button>
           <button class="btn btn-success" id="copy-btn"><i class="fas fa-copy"></i> Copy Config</button>
-          <button class="btn btn-secondary" id="generate-vless-btn"><i class="fas fa-bolt"></i> Generate ${atob(flash)}</button>
+          <button class="btn btn-secondary" id="generate-vless-btn"><i class="fas fa-bolt"></i> Generate ${decodedFlash}</button>
         </div>
       </div>
 
@@ -1210,6 +1331,79 @@ function serveUI() {
         </div>
       </div>
 
+      <!-- Visitor Information Card -->
+      <div class="card">
+        <div class="card-header">
+          <i class="fas fa-users"></i>
+          <h3>Informasi Pengunjung</h3>
+        </div>
+
+        <div class="visitor-info-container">
+          <div class="visitor-card">
+            <div class="visitor-header">
+              <i class="fas fa-globe visitor-icon"></i>
+              <div class="visitor-title">Informasi IP</div>
+            </div>
+            <div class="visitor-details">
+              <div class="visitor-detail">
+                <span class="visitor-label"><i class="fas fa-network-wired"></i> IP Address:</span>
+                <span class="visitor-value ip-address" id="visitor-ip">Loading...</span>
+              </div>
+              <div class="visitor-detail">
+                <span class="visitor-label"><i class="fas fa-map-marker-alt"></i> Lokasi:</span>
+                <span class="visitor-value location-info" id="visitor-location">Loading...</span>
+              </div>
+              <div class="visitor-detail">
+                <span class="visitor-label"><i class="fas fa-flag"></i> Negara:</span>
+                <span class="visitor-value" id="visitor-country">Loading...</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="visitor-card">
+            <div class="visitor-header">
+              <i class="fas fa-wifi visitor-icon"></i>
+              <div class="visitor-title">Informasi ISP</div>
+            </div>
+            <div class="visitor-details">
+              <div class="visitor-detail">
+                <span class="visitor-label"><i class="fas fa-building"></i> Provider:</span>
+                <span class="visitor-value isp-name" id="visitor-isp">Loading...</span>
+              </div>
+              <div class="visitor-detail">
+                <span class="visitor-label"><i class="fas fa-satellite"></i> ASN:</span>
+                <span class="visitor-value" id="visitor-asn">Loading...</span>
+              </div>
+              <div class="visitor-detail">
+                <span class="visitor-label"><i class="fas fa-shield-alt"></i> Keamanan:</span>
+                <span class="visitor-value" id="visitor-security">Loading...</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="visitor-card">
+            <div class="visitor-header">
+              <i class="fas fa-info-circle visitor-icon"></i>
+              <div class="visitor-title">Detail Sistem</div>
+            </div>
+            <div class="visitor-details">
+              <div class="visitor-detail">
+                <span class="visitor-label"><i class="fas fa-desktop"></i> Browser:</span>
+                <span class="visitor-value" id="visitor-browser">Loading...</span>
+              </div>
+              <div class="visitor-detail">
+                <span class="visitor-label"><i class="fas fa-mobile-alt"></i> Perangkat:</span>
+                <span class="visitor-value" id="visitor-device">Loading...</span>
+              </div>
+              <div class="visitor-detail">
+                <span class="visitor-label"><i class="fas fa-clock"></i> Waktu Akses:</span>
+                <span class="visitor-value" id="visitor-time">Loading...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Traffic Monitoring Card with Running Text -->
       <div class="card">
         <div class="card-header">
@@ -1267,7 +1461,7 @@ function serveUI() {
     </div>
 
     <div class="footer">
-      <p>${atob(judul)} Worker • Auto Bank Proxy System • Real-time Monitoring</p>
+      <p>${decodedJudul} Worker • Auto Bank Proxy System • Real-time Monitoring</p>
       <div class="credit">
         <p>Dipersembahkan oleh <strong>ANDRE CELL</strong> | Powered by <a href="https://github.com/megawanted" target="_blank">@megawanted</a></p>
       </div>
@@ -1352,6 +1546,82 @@ function serveUI() {
   setInterval(updateDigitalClock, 1000);
   updateDigitalClock();
 
+  // Visitor Information Functions
+  async function loadVisitorInfo() {
+    try {
+      // Menggunakan API untuk mendapatkan informasi IP pengunjung
+      const response = await fetch('https://ipapi.co/json/');
+      const data = await response.json();
+      
+      // Update informasi pengunjung
+      document.getElementById('visitor-ip').textContent = data.ip || 'Tidak diketahui';
+      document.getElementById('visitor-location').textContent = (data.city || '') + ', ' + (data.region || '');
+      document.getElementById('visitor-country').textContent = data.country_name || 'Tidak diketahui';
+      document.getElementById('visitor-isp').textContent = data.org || data.asn || 'Tidak diketahui';
+      document.getElementById('visitor-asn').textContent = data.asn || 'Tidak diketahui';
+      
+      // Deteksi browser dan perangkat
+      detectBrowserAndDevice();
+      
+      // Update waktu akses
+      document.getElementById('visitor-time').textContent = new Date().toLocaleString('id-ID');
+      
+      // Update informasi keamanan
+      updateSecurityInfo(data);
+      
+    } catch (error) {
+      console.error('Error loading visitor info:', error);
+      // Fallback jika API tidak bekerja
+      fallbackVisitorInfo();
+    }
+  }
+
+  function detectBrowserAndDevice() {
+    const userAgent = navigator.userAgent;
+    let browser = 'Tidak diketahui';
+    let device = 'Tidak diketahui';
+    
+    // Deteksi browser
+    if (userAgent.includes('Chrome')) browser = 'Google Chrome';
+    else if (userAgent.includes('Firefox')) browser = 'Mozilla Firefox';
+    else if (userAgent.includes('Safari')) browser = 'Apple Safari';
+    else if (userAgent.includes('Edge')) browser = 'Microsoft Edge';
+    else if (userAgent.includes('Opera')) browser = 'Opera';
+    
+    // Deteksi perangkat
+    if (userAgent.includes('Mobile')) device = 'Mobile/Tablet';
+    else device = 'Desktop';
+    
+    document.getElementById('visitor-browser').textContent = browser;
+    document.getElementById('visitor-device').textContent = device;
+  }
+
+  function updateSecurityInfo(data) {
+    const security = navigator.userAgent.includes('HTTPS') ? 'Aman (HTTPS)' : 'Perhatian (HTTP)';
+    document.getElementById('visitor-security').textContent = security;
+    
+    // Tambahkan warna berdasarkan keamanan
+    const securityElement = document.getElementById('visitor-security');
+    if (security.includes('Aman')) {
+      securityElement.style.color = '#10b981';
+    } else {
+      securityElement.style.color = '#f59e0b';
+    }
+  }
+
+  function fallbackVisitorInfo() {
+    // Informasi fallback jika API tidak tersedia
+    document.getElementById('visitor-ip').textContent = 'Tidak dapat mengambil IP';
+    document.getElementById('visitor-location').textContent = 'Lokasi tidak tersedia';
+    document.getElementById('visitor-country').textContent = 'Negara tidak diketahui';
+    document.getElementById('visitor-isp').textContent = 'ISP tidak diketahui';
+    document.getElementById('visitor-asn').textContent = 'ASN tidak diketahui';
+    document.getElementById('visitor-security').textContent = 'Keamanan tidak diketahui';
+    
+    detectBrowserAndDevice();
+    document.getElementById('visitor-time').textContent = new Date().toLocaleString('id-ID');
+  }
+
   // Traffic Monitoring Functions
   async function loadTrafficStats() {
     try {
@@ -1381,16 +1651,17 @@ function serveUI() {
   // Fungsi untuk update running text
   function updateRunningText(data) {
     const runningText = document.getElementById('running-text');
+    const judulDecoded = '${decodedJudul}';
     
     const messages = [
-      \`🚀 \${atob(judul)} Worker - Total Pengunjung: \${data.totalVisitors.toLocaleString()} orang\`,
-      \`📊 Pengunjung Hari Ini: \${data.todayVisitors.toLocaleString()} orang\`,
-      \`💾 Total Bandwidth Digunakan: \${data.totalBandwidth}\`,
-      \`⚡ Bandwidth Hari Ini: \${data.todayBandwidth}\`,
-      \`🔒 Koneksi Aman - Powered by ANDRE CELL\`,
-      \`🌐 System Online - Real-time Monitoring Aktif\`,
-      \`🔄 Auto Proxy Rotation - Bank Proxy Terjamin\`,
-      \`📈 Traffic Monitoring - \${data.todayVisitors} visitors today\`
+      '🚀 ' + judulDecoded + ' Worker - Total Pengunjung: ' + data.totalVisitors.toLocaleString() + ' orang',
+      '📊 Pengunjung Hari Ini: ' + data.todayVisitors.toLocaleString() + ' orang',
+      '💾 Total Bandwidth Digunakan: ' + data.totalBandwidth,
+      '⚡ Bandwidth Hari Ini: ' + data.todayBandwidth,
+      '🔒 Koneksi Aman - Powered by ANDRE CELL',
+      '🌐 System Online - Real-time Monitoring Aktif',
+      '🔄 Auto Proxy Rotation - Bank Proxy Terjamin',
+      '📈 Traffic Monitoring - ' + data.todayVisitors + ' visitors today'
     ];
 
     // Buat elemen untuk setiap pesan
@@ -1467,15 +1738,17 @@ function serveUI() {
     uptimeValue.textContent = formatDuration(Date.now() - startTime);
   }
 
-  function showNotification(message, type='success') {
+  function showNotification(message, type) {
+    if (!type) type = 'success';
     notificationText.textContent = message;
     notification.className = 'notification show';
     notification.style.background = (type === 'error') ? 'var(--danger)' : 'var(--success)';
-    setTimeout(()=> notification.classList.remove('show'), 3000);
+    setTimeout(function() { notification.classList.remove('show'); }, 3000);
   }
 
   // Load config dari backend dengan domain
-  async function loadConfig(domain = '') {
+  async function loadConfig(domain) {
+    if (!domain) domain = currentDomain;
     try {
       configProgress.style.width = '30%';
       const domainParam = domain || currentDomain;
@@ -1512,7 +1785,8 @@ function serveUI() {
 
         // tampilkan list proxy
         proxyList.innerHTML = '';
-        [...sgList, ...idList].forEach(p => {
+        var allProxies = sgList.concat(idList);
+        allProxies.forEach(function(p) {
           const div = document.createElement('div');
           div.className = 'proxy-item proxy-inactive';
           div.innerHTML = '<span>' + p.prxIP + ':' + p.prxPort + ' - ' + (p.org || p.country || '') + '</span><span class="proxy-status">Inactive</span>';
@@ -1532,7 +1806,7 @@ function serveUI() {
         showNotification('No config returned', 'error');
       }
 
-      setTimeout(()=> configProgress.style.width = '0%', 1000);
+      setTimeout(function() { configProgress.style.width = '0%'; }, 1000);
     } catch (err) {
       console.error(err);
       configBox.textContent = 'Error loading configuration';
@@ -1622,8 +1896,8 @@ function serveUI() {
       const parts = (activeProxy.textContent || '').split(':');
       const ip = parts[0];
       const port = parts[1] ? parts[1].split(' ')[0] : '443';
-      testPing({ ip, port });
-      autoPingInterval = setInterval(() => testPing({ ip, port }), 5000);
+      testPing({ ip: ip, port: port });
+      autoPingInterval = setInterval(function() { testPing({ ip: ip, port: port }); }, 5000);
       autoPingBtn.innerHTML = '<i class="fas fa-stop"></i> Stop Auto Ping';
       autoPingBtn.classList.add('btn-danger');
       showNotification('Auto ping started');
@@ -1658,14 +1932,14 @@ function serveUI() {
   }
 
   // Event listeners
-  refreshBtn.addEventListener('click', () => loadConfig(currentDomain));
+  refreshBtn.addEventListener('click', function() { loadConfig(currentDomain); });
   copyBtn.addEventListener('click', copyConfig);
-  generateVlessBtn.addEventListener('click', () => loadConfig(currentDomain));
-  pingBtn.addEventListener('click', () => {
+  generateVlessBtn.addEventListener('click', function() { loadConfig(currentDomain); });
+  pingBtn.addEventListener('click', function() {
     const parts = (activeProxy.textContent || '').split(':');
     const ip = parts[0];
     const port = parts[1] ? parts[1].split(' ')[0] : '443';
-    testPing({ ip, port });
+    testPing({ ip: ip, port: port });
   });
   autoPingBtn.addEventListener('click', toggleAutoPing);
   rotateProxyBtn.addEventListener('click', rotateProxy);
@@ -1673,7 +1947,7 @@ function serveUI() {
   applyWildcardBtn.addEventListener('click', applyWildcard);
   
   // Enter key untuk wildcard input
-  wildcardInput.addEventListener('keypress', (e) => {
+  wildcardInput.addEventListener('keypress', function(e) {
     if (e.key === 'Enter') {
       applyWildcard();
     }
@@ -1682,17 +1956,20 @@ function serveUI() {
   // Initial load
   loadConfig(currentDomain);
   loadTrafficStats(); // Load traffic stats on page load
+  loadVisitorInfo(); // Load visitor information on page load
   
-  setTimeout(() => {
+  setTimeout(function() {
     const parts = (activeProxy.textContent || '').split(':');
     const ip = parts[0];
     const port = parts[1] ? parts[1].split(' ')[0] : '443';
-    testPing({ ip, port });
+    testPing({ ip: ip, port: port });
   }, 1000);
 
   setInterval(updateUptime, 1000);
   // Auto refresh traffic stats every 30 seconds
   setInterval(loadTrafficStats, 30000);
+  // Auto refresh visitor info every 60 seconds
+  setInterval(loadVisitorInfo, 60000);
 </script>
 
 </body>
@@ -1709,20 +1986,49 @@ function serveUI() {
 /* =======================
    TRAFFIC STATS ENDPOINT
    ======================= */
-async function serveTrafficStats(request, env) {
-  await loadTrafficStats(env);
+async function serveTrafficStats(request) {
+  const url = new URL(request.url);
+  
+  // Handle reset request
+  if (url.searchParams.get('reset') === 'true' && request.method === 'POST') {
+    trafficStats = {
+      totalVisitors: 0,
+      uniqueVisitors: new Set(),
+      bandwidthUsed: 0,
+      todayVisitors: 0,
+      todayBandwidth: 0,
+      lastReset: new Date().toISOString().split('T')[0]
+    };
+    
+    return new Response(JSON.stringify({ 
+      success: true, 
+      message: 'Traffic data reset successfully' 
+    }), {
+      headers: { 
+        "Content-Type": "application/json",
+        ...CORS_HEADER_OPTIONS
+      }
+    });
+  }
+  
+  // Return current traffic stats
   const stats = {
     totalVisitors: trafficStats.totalVisitors,
     todayVisitors: trafficStats.todayVisitors,
     totalBandwidth: formatBytes(trafficStats.bandwidthUsed),
     todayBandwidth: formatBytes(trafficStats.todayBandwidth),
+    totalBandwidthValue: trafficStats.bandwidthUsed,
+    todayBandwidthValue: trafficStats.todayBandwidth,
     lastReset: trafficStats.lastReset
   };
+  
   return new Response(JSON.stringify(stats), {
-    headers: { "Content-Type": "application/json" }
+    headers: { 
+      "Content-Type": "application/json",
+      ...CORS_HEADER_OPTIONS
+    }
   });
 }
-
 
 /* =======================
    Simple /ping (used by UI)
