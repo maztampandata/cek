@@ -38,7 +38,7 @@ let cachedPrxList = {};
 
 async function loadTrafficStats(env) {
   if (trafficStats) return trafficStats;
-  const raw = await env.TRAFFIC_KV.get("trafficStats");
+  const raw = await env.traffic_stats.get("trafficStats");
   if (raw) {
     const parsed = JSON.parse(raw);
     parsed.uniqueVisitors = new Set(parsed.uniqueVisitors || []);
@@ -63,7 +63,7 @@ async function saveTrafficStats(env) {
     ...trafficStats,
     uniqueVisitors: Array.from(trafficStats.uniqueVisitors)
   };
-  await env.TRAFFIC_KV.put("trafficStats", JSON.stringify(serializable));
+  await env.traffic_stats.put("trafficStats", JSON.stringify(serializable));
 }
 
 // Fungsi untuk mendapatkan visitor ID berdasarkan IP dan User-Agent
