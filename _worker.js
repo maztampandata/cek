@@ -2164,28 +2164,10 @@ export default {
 
     // WebSocket
     if (upgradeHeader === "websocket") {
-      let selectedPrxIP = null;
       const prxMatch = url.pathname.match(/^\/(.+[:=-]\d+)$/);
-
-      if (url.pathname.length === 3 || url.pathname.includes(",")) {
+      selectedPrxIP = prxMatch[1];
+     return await websocketHandler(request);
      
-        const prxKeys = url.pathname.replace("/", "").toUpperCase().split(",");
-        const prxKey = prxKeys[Math.floor(Math.random() * prxKeys.length)];
-        const kvPrx = await getKVPrxList();
-        if (kvPrx[prxKey] && kvPrx[prxKey].length) {
-          selectedPrxIP = kvPrx[prxKey][Math.floor(Math.random() * kvPrx[prxKey].length)];
-        }
-      } else if (prxMatch) {
-        selectedPrxIP = prxMatch[1];
-      }
-
-      if (selectedPrxIP) {
-        // Pass selectedPrxIP to websocketHandler if needed
-        prxIP = selectedPrxIP;
-        return await websocketHandler(request);
-      } else {
-        return new Response("Invalid proxy selection", { status: 400 });
-      }
     }
 
 
