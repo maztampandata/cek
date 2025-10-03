@@ -1,8 +1,8 @@
 import { connect } from "cloudflare:sockets";
 
 // Variables
-const rootDomain = "mazlana.biz.id";
-const serviceName = "cosmos";
+const rootDomain = "destimyangel.my.id";
+const serviceName = "mzl";
 
 let prxIP = "";
 let cachedPrxList = [];
@@ -35,11 +35,9 @@ const PROXY_SOURCE = [
   { prxIP: "36.95.152.58", prxPort: "12137", country: "ID", org: "PT Telekomunikasi Indonesia" },
 ];
 
-
 async function getPrxList() {
-  const shuffled = [...PROXY_SOURCE];
-  shuffleArray(shuffled);  
-  return shuffled;
+  const picked = PROXY_SOURCE[Math.floor(Math.random() * PROXY_SOURCE.length)];
+  return [picked];
 }
 
 
@@ -102,43 +100,41 @@ export default {
         const apiPath = url.pathname.replace("/api/v1", "");
    
 if (apiPath.startsWith("/sub")) {
- 
-  const prxList = await getPrxList(); 
+  const prx = await getPrxList();
   const fillerDomain = url.searchParams.get("domain") || APP_DOMAIN;
   const uuid = crypto.randomUUID();
-  const formattedResult = prxList.map((prx) => {
-  const config_tls = {
-      [atob(flash)]: (() => {
-        const uri = new URL(`${atob(flash)}://${fillerDomain}`);
-        uri.searchParams.set("encryption", "none");
-        uri.searchParams.set("type", "ws");
-        uri.searchParams.set("host", APP_DOMAIN);
-        uri.protocol = atob(flash);
-        uri.port = "443";
-        uri.username = uuid;
-        uri.searchParams.set("security", "tls");
-        uri.searchParams.set("sni", APP_DOMAIN);
-        uri.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
-        uri.hash = `${prx.org} WS TLS [${serviceName}]`;
-        return uri.toString();
-      })()
-    };
 
-    return {
-      country: prx.country,
-      ip: prx.prxIP,
-      port: prx.prxPort,
-      org: prx.org,
-      config_tls
-    };
-  });
+  const config_tls = {
+    [atob(flash)]: (() => {
+      const uri = new URL(`${atob(flash)}://${fillerDomain}`);
+      uri.searchParams.set("encryption", "none");
+      uri.searchParams.set("type", "ws");
+      uri.searchParams.set("host", APP_DOMAIN);
+      uri.protocol = atob(flash);
+      uri.port = "443";
+      uri.username = uuid;
+      uri.searchParams.set("security", "tls");
+      uri.searchParams.set("sni", APP_DOMAIN);
+      uri.searchParams.set("path", `/${prx.prxIP}-${prx.prxPort}`);
+      uri.hash = `${prx.org} WS TLS [${serviceName}]`;
+      return uri.toString();
+    })(),
+  };
+
+  const formattedResult = {
+    country: prx.country,
+    ip: prx.prxIP,
+    port: prx.prxPort,
+    org: prx.org,
+    config_tls,
+  };
 
   return new Response(JSON.stringify(formattedResult, null, 2), {
     status: 200,
     headers: {
       ...CORS_HEADER_OPTIONS,
-      "Content-Type": "application/json"
-    }
+      "Content-Type": "application/json",
+    },
   });
 } else if (apiPath.startsWith("/myip")) {
           return new Response(
