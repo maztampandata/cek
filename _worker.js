@@ -719,14 +719,6 @@ function shuffleArray(array) {
 
 
 
-async function checkPrxHealth(prxIP, prxPort) {
-  try {
-    const req = await fetch(`${PRX_HEALTH_CHECK_API}?ip=${prxIP}:${prxPort}`);
-    return await req.json();
-  } catch (err) {
-    return { error: 'fetch_failed', message: err.message };
-  }
-}
 
 
 
