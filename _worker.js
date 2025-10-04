@@ -2147,10 +2147,7 @@ export default {
     }
 
     // WebSocket
-    if (upgradeHeader === "websocket") {
-  const prxList = await getPrxList();
-  const prxMatch = url.pathname.match(/^\/(.+[:=-]\d+)$/);
-
+   
   // Jika path pendek (misal: /ws, /x, /2) atau path mengandung koma, fallback ke proxy acak
 if (upgradeHeader === "websocket") {
   const prxList = await getPrxList();
