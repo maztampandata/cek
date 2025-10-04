@@ -1430,52 +1430,62 @@ function serveUI() {
   </audio>
 
 <script>
-  // Backsound dan Popup Functions
-  const backgroundSound = document.getElementById('backgroundSound');
-  const popupBanner = document.getElementById('popupBanner');
-  const closePopup = document.getElementById('closePopup');
-  const toggleSound = document.getElementById('toggleSound');
-  let isSoundPlaying = false;
+  // Jalankan semua setelah DOM siap
+  document.addEventListener('DOMContentLoaded', function () {
+    const backgroundSound = document.getElementById('backgroundSound');
+    const popupBanner = document.getElementById('popupBanner');
+    const closePopup = document.getElementById('closePopup');
+    const toggleSound = document.getElementById('toggleSound');
+    let isSoundPlaying = false;
 
-  // Show popup on page load
-  window.addEventListener('load', function() {
+    // Tampilkan popup saat halaman selesai load
     setTimeout(() => {
-      popupBanner.style.display = 'flex';
-      // Auto play sound after 2 seconds
+      if (popupBanner) popupBanner.style.display = 'flex';
+      // Auto play sound setelah 2 detik
       setTimeout(() => {
         playScarySound();
       }, 2000);
     }, 1000);
-  });
 
-  // Close popup
-  closePopup.addEventListener('click', function() {
-    popupBanner.style.display = 'none';
-  });
-
-  // Toggle sound
-  toggleSound.addEventListener('click', function() {
-    if (isSoundPlaying) {
-      backgroundSound.pause();
-      toggleSound.innerHTML = '<i class="fas fa-volume-mute"></i> Play Background Sound';
-    } else {
-      playScarySound();
-      toggleSound.innerHTML = '<i class="fas fa-volume-up"></i> Stop Background Sound';
+    // Tombol close popup
+    if (closePopup) {
+      closePopup.addEventListener('click', function () {
+        popupBanner.style.display = 'none';
+        backgroundSound.pause();
+        isSoundPlaying = false;
+        if (toggleSound)
+          toggleSound.innerHTML = '<i class="fas fa-volume-mute"></i> Play Background Sound';
+      });
     }
-    isSoundPlaying = !isSoundPlaying;
-  });
 
-  function playScarySound() {
-    backgroundSound.volume = 0.3;
-    backgroundSound.play().catch(e => {
-      console.log('Audio play failed:', e);
-      // Fallback sound
-      const fallbackSound = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==');
-      fallbackSound.volume = 0.2;
-      fallbackSound.loop = true;
-      fallbackSound.play();
-    });
-  }
+    // Tombol toggle sound
+    if (toggleSound) {
+      toggleSound.addEventListener('click', function () {
+        if (isSoundPlaying) {
+          backgroundSound.pause();
+          toggleSound.innerHTML = '<i class="fas fa-volume-mute"></i> Play Background Sound';
+        } else {
+          playScarySound();
+          toggleSound.innerHTML = '<i class="fas fa-volume-up"></i> Stop Background Sound';
+        }
+        isSoundPlaying = !isSoundPlaying;
+      });
+    }
+
+    function playScarySound() {
+      if (!backgroundSound) return;
+      backgroundSound.volume = 0.3;
+      backgroundSound.play().catch(e => {
+        console.warn('Audio play failed:', e);
+        const fallbackSound = new Audio(
+          'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA=='
+        );
+        fallbackSound.volume = 0.2;
+        fallbackSound.loop = true;
+        fallbackSound.play();
+      });
+    }
+  })
 
   // Digital Clock Function
   function updateDigitalClock() {
