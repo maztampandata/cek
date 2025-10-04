@@ -287,103 +287,79 @@ async function reverseWeb(request, target, targetPath) {
    (ported and adapted from original code)
    ======================= */
 
-async function websocketHandler(request) {
+async function websocketHandler(request, proxyIP, proxyPort) {
   const webSocketPair = new WebSocketPair();
   const [client, webSocket] = Object.values(webSocketPair);
   webSocket.accept();
 
-  let addressLog = "";
-  let portLog = "";
-  const log = (info, event) => {
-    console.log(`[${addressLog}:${portLog}] ${info}`, event || "");
-  };
+  const log = (info, event) => console.log(`[${proxyIP}:${proxyPort}] ${info}`, event || "");
+
   const earlyDataHeader = request.headers.get("sec-websocket-protocol") || "";
   const readableWebSocketStream = makeReadableWebSocketStream(webSocket, earlyDataHeader, log);
 
-  let remoteSocketWrapper = {
-    value: null,
-  };
-  let isDNS = false;
+  let remoteSocketWrapper = { value: null };
 
-  readableWebSocketStream
-    .pipeTo(
-      new WritableStream({
-        async write(chunk) {
-          if (isDNS) {
-            return handleUDPOutbound(DNS_SERVER_ADDRESS, DNS_SERVER_PORT, chunk, webSocket, null, log);
-          }
-          if (remoteSocketWrapper.value) {
-            const writer = remoteSocketWrapper.value.writable.getWriter();
-            await writer.write(chunk);
-            writer.releaseLock();
-            return;
-          }
+  // Alirkan data client ke proxy target
+  readableWebSocketStream.pipeTo(
+    new WritableStream({
+      async write(chunk) {
+        // Jika koneksi TCP sudah terbentuk, kirim langsung
+        if (remoteSocketWrapper.value) {
+          const writer = remoteSocketWrapper.value.writable.getWriter();
+          await writer.write(chunk);
+          writer.releaseLock();
+          return;
+        }
 
-          const protocol = await protocolSniffer(chunk);
-          let protocolHeader;
+        // 🌐 Buat koneksi TCP ke proxy sesuai path
+        const tcpSocket = connect({
+          hostname: proxyIP,
+          port: proxyPort,
+        });
+        remoteSocketWrapper.value = tcpSocket;
+        log(`Connected to proxy ${proxyIP}:${proxyPort}`);
 
-          if (protocol === atob(horse)) {
-            protocolHeader = readHorseHeader(chunk);
-          } else if (protocol === atob(flash)) {
-            protocolHeader = readFlashHeader(chunk);
-          } else {
-            protocolHeader = readSsHeader(chunk);
-          }
+        // Kirim data awal
+        const writer = tcpSocket.writable.getWriter();
+        await writer.write(chunk);
+        writer.releaseLock();
 
-          addressLog = protocolHeader.addressRemote;
-          portLog = `${protocolHeader.portRemote} -> ${protocolHeader.isUDP ? "UDP" : "TCP"}`;
-
-          if (protocolHeader.hasError) {
-            throw new Error(protocolHeader.message);
-          }
-
-          if (protocolHeader.isUDP) {
-            if (protocolHeader.portRemote === 53) {
-              isDNS = true;
-            } else {
-              // UDP other than DNS is not supported in this worker
-              throw new Error("UDP only support for DNS port 53");
-            }
-          }
-
-          if (isDNS) {
-            return handleUDPOutbound(
-              DNS_SERVER_ADDRESS,
-              DNS_SERVER_PORT,
-              chunk,
-              webSocket,
-              protocolHeader.version,
-              log
-            );
-          }
-
-          handleTCPOutBound(
-            remoteSocketWrapper,
-            protocolHeader.addressRemote,
-            protocolHeader.portRemote,
-            protocolHeader.rawClientData,
-            webSocket,
-            protocolHeader.version,
-            log
-          );
-        },
-        close() {
-          log(`readableWebSocketStream is close`);
-        },
-        abort(reason) {
-          log(`readableWebSocketStream is abort`, JSON.stringify(reason));
-        },
-      })
-    )
-    .catch((err) => {
-      log("readableWebSocketStream pipeTo error", err);
-    });
-
-  return new Response(null, {
-    status: 101,
-    webSocket: client,
+        // Bridge dua arah
+        remoteSocketToWS(tcpSocket, webSocket, null, null, log);
+      },
+      close() {
+        log("🔌 WebSocket closed");
+      },
+      abort(reason) {
+        log("⚠️ Aborted:", JSON.stringify(reason));
+      },
+    })
+  ).catch((err) => {
+    log("PipeTo error", err);
   });
+
+  return new Response(null, { status: 101, webSocket: client });
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 async function protocolSniffer(buffer) {
   if (buffer.byteLength >= 62) {
@@ -2171,31 +2147,24 @@ export default {
     }
 
     // WebSocket
-if (upgradeHeader === "websocket") {
+    if (upgradeHeader === "websocket") {
   const prxList = await getPrxList();
   const prxMatch = url.pathname.match(/^\/(.+[:=-]\d+)$/);
 
   // Jika path pendek (misal: /ws, /x, /2) atau path mengandung koma, fallback ke proxy acak
-  if (url.pathname.length == 3 || url.pathname.match(",")) {
-    const picked = prxList[Math.floor(Math.random() * prxList.length)];
-    prxIP = `${picked.prxIP}:${picked.prxPort}`;
-    console.log(`🟢 Random proxy used for websocket: ${prxIP}`);
-    return await websocketHandler(request);
-  }
+if (upgradeHeader === "websocket") {
+  const prxList = await getPrxList();
+  const prxMatch = url.pathname.match(/^\/([\d\.]+)[-:](\d+)$/);
 
-  // Jika path berisi IP:PORT atau IP-PORT (misal /103.6.207.108-8080)
-  else if (prxMatch) {
-    prxIP = prxMatch[1];
-    console.log(`🟢 Using proxy from path: ${prxIP}`);
-    return await websocketHandler(request);
-  }
-
-  // Fallback jika tidak ada path cocok
-  else {
+  if (prxMatch) {
+    const targetIP = prxMatch[1];
+    const targetPort = parseInt(prxMatch[2]);
+    console.log(`🟢 WebSocket connecting via ${targetIP}:${targetPort}`);
+    return await websocketHandler(request, targetIP, targetPort);
+  } else {
     const picked = prxList[Math.floor(Math.random() * prxList.length)];
-    prxIP = `${picked.prxIP}:${picked.prxPort}`;
-    console.log(`🔁 Fallback to random proxy: ${prxIP}`);
-    return await websocketHandler(request);
+    console.log(`🟢 Fallback proxy ${picked.prxIP}:${picked.prxPort}`);
+    return await websocketHandler(request, picked.prxIP, picked.prxPort);
   }
 }
 
