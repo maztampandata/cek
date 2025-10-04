@@ -126,11 +126,11 @@ async function getPrxList() {
 async function generateSubscription(params, request) {
   const domainParam = params.domain || "bug.com"; 
   const fillerHost = (request && request.headers.get("Host")) ;
-  const prx= await getPrxList();
+  const prox= await getPrxList();
   if (!prxList.length) return JSON.stringify({ error: "No proxy available" });
 
   // Ambil proxy random
-  const prx = prx[Math.floor(Math.random() * prx.length)];
+  const prx = prox[Math.floor(Math.random() * prox.length)];
   const uuid = crypto.randomUUID();
 
   const config_vls = {
