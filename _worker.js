@@ -197,7 +197,7 @@ async function generateSubscription(params, request) {
 
   // host filler otomatis dari request host
   const fillerHost = (request && request.headers.get("Host")) ;
-  const prxList = getPrxList();
+  const prxList = await getPrxList();
   if (!prxList.length) return JSON.stringify({ error: "No proxy available" });
 
   // Ambil proxy random
