@@ -2067,6 +2067,7 @@ export default {
   async handleRequest(request, env, ctx) {
     const url = new URL(request.url);
     const pathname = url.pathname;
+     const prxList = await getPrxList();
     const upgradeHeader = request.headers.get("Upgrade");
     if (upgradeHeader === "websocket") {
         const prxMatch = url.pathname.match(/^\/(.+[:=-]\d+)$/);
