@@ -2020,6 +2020,34 @@ async function servePing() {
   });
 }
 
+/* =======================
+   ALL PROXY ENDPOINT
+   ======================= */
+async function serveAllProxy() {
+  // ambil daftar proxy dari PROXY_SOURCE
+  const list = PROXY_SOURCE.map((p, i) => ({
+    id: i + 1,
+    ip: p.prxIP,
+    port: p.prxPort,
+    country: p.country,
+    org: p.org
+  }));
+
+  const result = {
+    total: list.length,
+    proxies: list
+  };
+
+  return new Response(JSON.stringify(result, null, 2), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      ...CORS_HEADER_OPTIONS
+    }
+  });
+}
+
+
 
 /* =======================
    MAIN WORKER HANDLER
@@ -2125,17 +2153,14 @@ export default {
       return servePing();
     }
 
+    if (pathname === "/allproxy") {
+      return serveAllProxy();
+    }
+
     if (upgradeHeader === "websocket") {
-        const prxMatch = url.pathname.match(/^\/(.+[:=-]\d+)$/);
-
-        if (url.pathname.length == 3 || url.pathname.match(",")) {
-          prxIP = `${prxIP}:${prxPort}`;
-
+        
           return await websocketHandler(request);
-        } else if (prxMatch) {
-          prxIP = prxMatch[1];
-          return await websocketHandler(request);
-        }
+        
       }
     
   
