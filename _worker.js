@@ -182,6 +182,152 @@ async function generateSubscription(params, request) {
 }
 
 
+async function reverseWeb(request, target, targetPath) {
+  const targetUrl = new URL(request.url);
+  const targetChunk = target.split(":");
+
+  targetUrl.hostname = targetChunk[0];
+  targetUrl.port = targetChunk[1]?.toString() || "443";
+  targetUrl.pathname = targetPath || targetUrl.pathname;
+
+  const modifiedRequest = new Request(targetUrl, request);
+
+  modifiedRequest.headers.set("X-Forwarded-Host", request.headers.get("Host"));
+
+  const response = await fetch(modifiedRequest);
+
+  const newResponse = new Response(response.body, response);
+  for (const [key, value] of Object.entries(CORS_HEADER_OPTIONS)) {
+    newResponse.headers.set(key, value);
+  }
+  newResponse.headers.set("X-Proxied-By", "Cloudflare Worker");
+
+  return newResponse;
+}
+
+
+export default {
+  async fetch(request, env, ctx) {
+    try {
+      const url = new URL(request.url);
+      const pathname = url.pathname;
+      const upgradeHeader = request.headers.get("Upgrade");
+
+      // Update traffic stats untuk semua request (kecuali WebSocket)
+      if (upgradeHeader !== "websocket") {
+        // Estimate response size untuk tracking
+        const originalResponse = await this.handleRequest(request, env, ctx);
+        const contentLength = originalResponse.headers.get("content-length");
+        let responseSize = contentLength ? parseInt(contentLength) : 0;
+
+        // Kalau tidak ada content-length, coba hitung isi response
+        if (!responseSize) {
+          try {
+            const body = await originalResponse.clone().text();
+            responseSize = new TextEncoder().encode(body).length;
+          } catch (_) {
+            responseSize = 0;
+          }
+        }
+
+        // ✅ perbaikan: sertakan env + ctx.waitUntil
+        ctx.waitUntil(updateTrafficStats(request, responseSize, env));
+
+        return originalResponse;
+      }
+
+      return await this.handleRequest(request, env, ctx);
+    } catch (err) {
+      return new Response(`An error occurred: ${err.toString()}`, {
+        status: 500,
+        headers: { ...CORS_HEADER_OPTIONS },
+      });
+    }
+  },
+
+  async handleRequest(request, env, ctx) {
+    const url = new URL(request.url);
+    const pathname = url.pathname;
+    const prxList = await getPrxList();
+    const upgradeHeader = request.headers.get("Upgrade");
+    if (upgradeHeader === "websocket") {
+        const prxMatch = url.pathname.match(/^\/(.+[:=-]\d+)$/);
+
+        if (url.pathname.length == 3 || url.pathname.match(",")) {
+          const picked = prxList[Math.floor(Math.random() * prxList.length)];
+          prxIP = `${picked.prxIP}:${picked.prxPort}`;
+
+          return await websocketHandler(request);
+        } else if (prxMatch) {
+          prxIP = prxMatch[1];
+          return await websocketHandler(request);
+        }
+      }
+      
+    // CORS preflight
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: CORS_HEADER_OPTIONS });
+    }
+
+    // Root -> UI
+    if (pathname === "/") {
+      return serveUI();
+    }
+
+    // Statistik
+    if (pathname === "/traffic") {
+      return await serveTrafficStats(request, env);
+      return new Response(JSON.stringify(stats, null, 2), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    // Health check
+    if (pathname === "/health") {
+      const ipPort = url.searchParams.get("ip");
+      if (!ipPort) {
+        return new Response(JSON.stringify({ error: "missing_ip" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      const [ip, port] = ipPort.split(":");
+      const result = await checkPrxHealth(ip, port || "443");
+      return new Response(JSON.stringify(result, null, 2), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+
+
+    // Subscription
+    if (pathname.startsWith("/sub")) {
+      const params = Object.fromEntries(url.searchParams.entries());
+      const out = await generateSubscription(params, request);
+      return new Response(out, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          ...CORS_HEADER_OPTIONS,
+        },
+      });
+    }
+
+    // Ping
+    if (pathname === "/ping") {
+      return servePing();
+    }
+    
+   
+
+    // Default reverse proxy
+    const targetReversePrx = (env && env.REVERSE_PRX_TARGET) || "example.com";
+    return await reverseWeb(request, targetReversePrx, null, env, ctx);
+  },
+};
+
+
 /* =======================
    Reverse Web / Basic Proxy
    ======================= */
@@ -1993,123 +2139,3 @@ async function servePing() {
 /* =======================
    MAIN WORKER HANDLER
    ======================= */
-export default {
-  async fetch(request, env, ctx) {
-    try {
-      const url = new URL(request.url);
-      const pathname = url.pathname;
-      const upgradeHeader = request.headers.get("Upgrade");
-
-      // Update traffic stats untuk semua request (kecuali WebSocket)
-      if (upgradeHeader !== "websocket") {
-        // Estimate response size untuk tracking
-        const originalResponse = await this.handleRequest(request, env, ctx);
-        const contentLength = originalResponse.headers.get("content-length");
-        let responseSize = contentLength ? parseInt(contentLength) : 0;
-
-        // Kalau tidak ada content-length, coba hitung isi response
-        if (!responseSize) {
-          try {
-            const body = await originalResponse.clone().text();
-            responseSize = new TextEncoder().encode(body).length;
-          } catch (_) {
-            responseSize = 0;
-          }
-        }
-
-        // ✅ perbaikan: sertakan env + ctx.waitUntil
-        ctx.waitUntil(updateTrafficStats(request, responseSize, env));
-
-        return originalResponse;
-      }
-
-      return await this.handleRequest(request, env, ctx);
-    } catch (err) {
-      return new Response(`An error occurred: ${err.toString()}`, {
-        status: 500,
-        headers: { ...CORS_HEADER_OPTIONS },
-      });
-    }
-  },
-
-  async handleRequest(request, env, ctx) {
-    const url = new URL(request.url);
-    const pathname = url.pathname;
-    const prxList = await getPrxList();
-    const upgradeHeader = request.headers.get("Upgrade");
-    if (upgradeHeader === "websocket") {
-        const prxMatch = url.pathname.match(/^\/(.+[:=-]\d+)$/);
-
-        if (url.pathname.length == 3 || url.pathname.match(",")) {
-          const picked = prxList[Math.floor(Math.random() * prxList.length)];
-          prxIP = `${picked.prxIP}:${picked.prxPort}`;
-
-          return await websocketHandler(request);
-        } else if (prxMatch) {
-          prxIP = prxMatch[1];
-          return await websocketHandler(request);
-        }
-      }
-      
-    // CORS preflight
-    if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: CORS_HEADER_OPTIONS });
-    }
-
-    // Root -> UI
-    if (pathname === "/") {
-      return serveUI();
-    }
-
-    // Statistik
-    if (pathname === "/traffic") {
-      return await serveTrafficStats(request, env);
-      return new Response(JSON.stringify(stats, null, 2), {
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    // Health check
-    if (pathname === "/health") {
-      const ipPort = url.searchParams.get("ip");
-      if (!ipPort) {
-        return new Response(JSON.stringify({ error: "missing_ip" }), {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      const [ip, port] = ipPort.split(":");
-      const result = await checkPrxHealth(ip, port || "443");
-      return new Response(JSON.stringify(result, null, 2), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-
-
-    // Subscription
-    if (pathname.startsWith("/sub")) {
-      const params = Object.fromEntries(url.searchParams.entries());
-      const out = await generateSubscription(params, request);
-      return new Response(out, {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          ...CORS_HEADER_OPTIONS,
-        },
-      });
-    }
-
-    // Ping
-    if (pathname === "/ping") {
-      return servePing();
-    }
-    
-   
-
-    // Default reverse proxy
-    const targetReversePrx = (env && env.REVERSE_PRX_TARGET) || "example.com";
-    return await reverseWeb(request, targetReversePrx, null, env, ctx);
-  },
-};
