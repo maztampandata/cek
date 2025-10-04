@@ -200,7 +200,7 @@ async function generateSubscription(params, request) {
   const prx = await getPrxList();
    const uuid = crypto.randomUUID();
 
-  if (!prx.length) return JSON.stringify({ error: "No proxy available" });
+  if (!prx) return JSON.stringify({ error: "No proxy available" });
  
   const config_vls = {
     [atob(flash)]: (() => {
