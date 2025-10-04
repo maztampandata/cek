@@ -2136,20 +2136,9 @@ export default {
       return servePing();
     }
     
-    if (path.startsWith("/all-proxy")) {
-      const response = {
-        total: PROXY_SOURCE.length,
-        proxies: PROXY_SOURCE
-      };
-
-      return new Response(JSON.stringify(response, null, 2), {
-        headers: { "content-type": "application/json; charset=utf-8" }
-      });
-    }
+  
 
 
-    // WebSocket
-    
 
     // Default reverse proxy
     const targetReversePrx = (env && env.REVERSE_PRX_TARGET) || "example.com";
