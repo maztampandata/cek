@@ -15,6 +15,8 @@ const neko = "Y2xhc2g=";
 const flash = "dmxlc3M=";
 const judul= "VkxFU1M=";
 
+const PRX_BANK_BASE =
+  "https://raw.githubusercontent.com/maztampandata/cfproxies/refs/heads/main/proxies";
 
 const DNS_SERVER_ADDRESS = "8.8.8.8";
 const DNS_SERVER_PORT = 53;
@@ -31,19 +33,38 @@ const CORS_HEADER_OPTIONS = {
   "Access-Control-Max-Age": "86400",
 };
 
+let trafficStats = null;
+let cachedPrxList = {}; 
 
-/* =======================
-   TRAFFIC & BANDWIDTH TRACKING
-   ======================= */
-// In-memory storage untuk tracking (akan reset saat worker restart)
-let trafficStats = {
-  totalVisitors: 0,
-  uniqueVisitors: new Set(),
-  bandwidthUsed: 0, // dalam bytes
-  todayVisitors: 0,
-  todayBandwidth: 0,
-  lastReset: new Date().toISOString().split('T')[0]
-};
+async function loadTrafficStats(env) {
+  if (trafficStats) return trafficStats;
+  const raw = await env.traffic_stats.get("trafficStats");
+  if (raw) {
+    const parsed = JSON.parse(raw);
+    parsed.uniqueVisitors = new Set(parsed.uniqueVisitors || []);
+    trafficStats = parsed;
+  } else {
+    trafficStats = {
+      totalVisitors: 0,
+      uniqueVisitors: new Set(),
+      bandwidthUsed: 0,
+      todayVisitors: 0,
+      todayBandwidth: 0,
+      lastReset: new Date().toISOString().split('T')[0]
+    };
+    await saveTrafficStats(env);
+  }
+  return trafficStats;
+}
+
+async function saveTrafficStats(env) {
+  if (!trafficStats) return;
+  const serializable = {
+    ...trafficStats,
+    uniqueVisitors: Array.from(trafficStats.uniqueVisitors)
+  };
+  await env.traffic_stats.put("trafficStats", JSON.stringify(serializable));
+}
 
 // Fungsi untuk mendapatkan visitor ID berdasarkan IP dan User-Agent
 function getVisitorId(request) {
@@ -63,33 +84,30 @@ function getVisitorId(request) {
 }
 
 // Fungsi untuk update traffic stats
-function updateTrafficStats(request, responseSize = 0) {
-  try {
-    const visitorId = getVisitorId(request);
-    const today = new Date().toISOString().split('T')[0];
-    
-    // Reset daily stats jika hari sudah berganti
-    if (trafficStats.lastReset !== today) {
-      trafficStats.todayVisitors = 0;
-      trafficStats.todayBandwidth = 0;
-      trafficStats.lastReset = today;
-    }
-    
-    // Update unique visitors
-    if (!trafficStats.uniqueVisitors.has(visitorId)) {
-      trafficStats.uniqueVisitors.add(visitorId);
-      trafficStats.totalVisitors++;
-      trafficStats.todayVisitors++;
-    }
-    
-    // Update bandwidth
-    trafficStats.bandwidthUsed += responseSize;
-    trafficStats.todayBandwidth += responseSize;
-    
-  } catch (error) {
-    console.error('Error updating traffic stats:', error);
+export async function updateTrafficStats(request, responseSize = 0, env) {
+  await loadTrafficStats(env);
+  const visitorId = getVisitorId(request);
+  const today = new Date().toISOString().split('T')[0];
+
+  if (trafficStats.lastReset !== today) {
+    trafficStats.todayVisitors = 0;
+    trafficStats.todayBandwidth = 0;
+    trafficStats.lastReset = today;
+    trafficStats.uniqueVisitors = new Set();
   }
+
+  if (!trafficStats.uniqueVisitors.has(visitorId)) {
+    trafficStats.uniqueVisitors.add(visitorId);
+    trafficStats.totalVisitors++;
+    trafficStats.todayVisitors++;
+  }
+
+  trafficStats.bandwidthUsed += responseSize;
+  trafficStats.todayBandwidth += responseSize;
+
+  await saveTrafficStats(env);
 }
+
 
 // Fungsi untuk format bytes ke readable format
 function formatBytes(bytes, decimals = 2) {
@@ -105,7 +123,7 @@ function formatBytes(bytes, decimals = 2) {
 }
 
 /* =======================
-   UTIL: Fetch proxy list
+   UTIL: Fetch proxy list file and parse
    ======================= */
 const PROXY_SOURCE = [
   { prxIP: "43.218.77.16", prxPort: "1443", country: "ID", org: "Amazoncom Inc" },
@@ -116,21 +134,74 @@ const PROXY_SOURCE = [
 async function getPrxList() {
   const shuffled = [...PROXY_SOURCE];
   shuffleArray(shuffled);  
-  return shuffled[Math.floor(Math.random() * shuffled.length)];
+  return shuffled[Math.floor(Math.random() * shuffled.length)]; // return 1 proxy random
+}   
+   
+   
+   
+
+/* =======================
+   HELPERS
+   ======================= */
+function shuffleArray(array) {
+  let currentIndex = array.length;
+  while (currentIndex !== 0) {
+    const randomIndex = Math.floor(Math.random() * currentIndex);
+    currentIndex--;
+    [array[currentIndex], array[randomIndex]] = [
+      array[randomIndex],
+      array[currentIndex],
+    ];
+  }
+  return array;
 }
 
+function arrayBufferToHex(buffer) {
+  return [...new Uint8Array(buffer)]
+    .map((x) => x.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function base64ToArrayBuffer(base64Str) {
+  if (!base64Str) return { error: null };
+  try {
+    base64Str = base64Str.replace(/-/g, "+").replace(/_/g, "/");
+    const decode = atob(base64Str);
+    const arr = Uint8Array.from(decode, (c) => c.charCodeAt(0));
+    return { earlyData: arr.buffer, error: null };
+  } catch (error) {
+    return { error };
+  }
+}
+
+function safeCloseWebSocket(socket) {
+  try {
+    if (
+      socket &&
+      (socket.readyState === WS_READY_STATE_OPEN ||
+        socket.readyState === WS_READY_STATE_CLOSING)
+    ) {
+      socket.close();
+    }
+  } catch (error) {
+    console.error("safeCloseWebSocket error", error);
+  }
+}
 
 /* =======================
    PROXY / SUB GENERATOR (ROTATE ONE RANDOM CONFIG from SG+ID with TLS & NTLS)
    ======================= */
 async function generateSubscription(params, request) {
-  const domainParam = params.domain || "bug.com"; 
+  // domain untuk SNI dari query param
+  const domainParam = params.domain || "bug.com";
+
+  // host filler otomatis dari request host
   const fillerHost = (request && request.headers.get("Host")) ;
-  const prox= await getPrxList();
-  if (!prox.length) return JSON.stringify({ error: "No proxy available" });
+  const prxList = getPrxList();
+  if (!prxList.length) return JSON.stringify({ error: "No proxy available" });
 
   // Ambil proxy random
-  const prx = prox[Math.floor(Math.random() * prox.length)];
+  const prx = prxList[Math.floor(Math.random() * prxList.length)];
   const uuid = crypto.randomUUID();
 
   const config_vls = {
@@ -670,52 +741,6 @@ function makeReadableWebSocketStream(webSocketServer, earlyDataHeader, log) {
 
   return stream;
 }
-
-function shuffleArray(array) {
-  let currentIndex = array.length;
-  while (currentIndex !== 0) {
-    const randomIndex = Math.floor(Math.random() * currentIndex);
-    currentIndex--;
-    [array[currentIndex], array[randomIndex]] = [
-      array[randomIndex],
-      array[currentIndex],
-    ];
-  }
-  return array;
-}
-
-function arrayBufferToHex(buffer) {
-  return [...new Uint8Array(buffer)]
-    .map((x) => x.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-function base64ToArrayBuffer(base64Str) {
-  if (!base64Str) return { error: null };
-  try {
-    base64Str = base64Str.replace(/-/g, "+").replace(/_/g, "/");
-    const decode = atob(base64Str);
-    const arr = Uint8Array.from(decode, (c) => c.charCodeAt(0));
-    return { earlyData: arr.buffer, error: null };
-  } catch (error) {
-    return { error };
-  }
-}
-
-function safeCloseWebSocket(socket) {
-  try {
-    if (
-      socket &&
-      (socket.readyState === WS_READY_STATE_OPEN ||
-        socket.readyState === WS_READY_STATE_CLOSING)
-    ) {
-      socket.close();
-    }
-  } catch (error) {
-    console.error("safeCloseWebSocket error", error);
-  }
-}
-
 
 
 async function checkPrxHealth(prxIP, prxPort) {
@@ -1430,62 +1455,52 @@ function serveUI() {
   </audio>
 
 <script>
-  // Jalankan semua setelah DOM siap
-  document.addEventListener('DOMContentLoaded', function () {
-    const backgroundSound = document.getElementById('backgroundSound');
-    const popupBanner = document.getElementById('popupBanner');
-    const closePopup = document.getElementById('closePopup');
-    const toggleSound = document.getElementById('toggleSound');
-    let isSoundPlaying = false;
+  // Backsound dan Popup Functions
+  const backgroundSound = document.getElementById('backgroundSound');
+  const popupBanner = document.getElementById('popupBanner');
+  const closePopup = document.getElementById('closePopup');
+  const toggleSound = document.getElementById('toggleSound');
+  let isSoundPlaying = false;
 
-    // Tampilkan popup saat halaman selesai load
+  // Show popup on page load
+  window.addEventListener('load', function() {
     setTimeout(() => {
-      if (popupBanner) popupBanner.style.display = 'flex';
-      // Auto play sound setelah 2 detik
+      popupBanner.style.display = 'flex';
+      // Auto play sound after 2 seconds
       setTimeout(() => {
         playScarySound();
       }, 2000);
     }, 1000);
+  });
 
-    // Tombol close popup
-    if (closePopup) {
-      closePopup.addEventListener('click', function () {
-        popupBanner.style.display = 'none';
-        backgroundSound.pause();
-        isSoundPlaying = false;
-        if (toggleSound)
-          toggleSound.innerHTML = '<i class="fas fa-volume-mute"></i> Play Background Sound';
-      });
-    }
+  // Close popup
+  closePopup.addEventListener('click', function() {
+    popupBanner.style.display = 'none';
+  });
 
-    // Tombol toggle sound
-    if (toggleSound) {
-      toggleSound.addEventListener('click', function () {
-        if (isSoundPlaying) {
-          backgroundSound.pause();
-          toggleSound.innerHTML = '<i class="fas fa-volume-mute"></i> Play Background Sound';
-        } else {
-          playScarySound();
-          toggleSound.innerHTML = '<i class="fas fa-volume-up"></i> Stop Background Sound';
-        }
-        isSoundPlaying = !isSoundPlaying;
-      });
+  // Toggle sound
+  toggleSound.addEventListener('click', function() {
+    if (isSoundPlaying) {
+      backgroundSound.pause();
+      toggleSound.innerHTML = '<i class="fas fa-volume-mute"></i> Play Background Sound';
+    } else {
+      playScarySound();
+      toggleSound.innerHTML = '<i class="fas fa-volume-up"></i> Stop Background Sound';
     }
+    isSoundPlaying = !isSoundPlaying;
+  });
 
-    function playScarySound() {
-      if (!backgroundSound) return;
-      backgroundSound.volume = 0.3;
-      backgroundSound.play().catch(e => {
-        console.warn('Audio play failed:', e);
-        const fallbackSound = new Audio(
-          'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA=='
-        );
-        fallbackSound.volume = 0.2;
-        fallbackSound.loop = true;
-        fallbackSound.play();
-      });
-    }
-  })
+  function playScarySound() {
+    backgroundSound.volume = 0.3;
+    backgroundSound.play().catch(e => {
+      console.log('Audio play failed:', e);
+      // Fallback sound
+      const fallbackSound = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==');
+      fallbackSound.volume = 0.2;
+      fallbackSound.loop = true;
+      fallbackSound.play();
+    });
+  }
 
   // Digital Clock Function
   function updateDigitalClock() {
@@ -1738,26 +1753,26 @@ function serveUI() {
           currentConfig = configBox.textContent;
         }
 
-      
-        
+
         proxyCount.textContent = PROXY_SOURCE.length + ' proxies available';
 
-if (typeof proxyList !== "undefined" && proxyList) {
-  proxyList.innerHTML = ""; 
+        // tampilkan list proxy
+        proxyList.innerHTML = '';
+        
+        PROXY_SOURCE.forEach(function(p) {
+          const div = document.createElement('div');
+          div.className = 'proxy-item proxy-inactive';
+          div.innerHTML = '<span>' + p.prxIP + ':' + p.prxPort + ' - ' + (p.org || p.country || '') + '</span><span class="proxy-status">Inactive</span>';
 
-  PROXY_SOURCE.forEach(p => {
-  const div = document.createElement("div");
-  div.className = "proxy-item proxy-inactive";
-  div.innerHTML = '<span>' + p.prxIP + ':' + p.prxPort + ' - ' + (p.org || p.country || '') + '</span><span class="proxy-status">Inactive</span>';
-  
-  if (typeof data !== "undefined" && p.prxIP === data.ip && String(p.prxPort) === String(data.port)) {
-      div.classList.remove("proxy-inactive");
-      div.classList.add("proxy-active");
-      div.querySelector(".proxy-status").textContent = "Active";
-    }
+          if (p.prxIP === data.ip && String(p.prxPort) === String(data.port)) {
+            div.classList.remove('proxy-inactive');
+            div.classList.add('proxy-active');
+            div.querySelector('.proxy-status').textContent = 'Active';
+          }
+          proxyList.appendChild(div);
+        });
 
-    proxyList.appendChild(div);
-  });
+        // test ping
         await testPing({ ip: data.ip, port: data.port });
       } else {
         configBox.textContent = 'No config (error)';
@@ -2006,7 +2021,8 @@ async function servePing() {
   });
 }
 
-/*====================
+
+/* =======================
    MAIN WORKER HANDLER
    ======================= */
 export default {
@@ -2020,10 +2036,22 @@ export default {
       if (upgradeHeader !== "websocket") {
         // Estimate response size untuk tracking
         const originalResponse = await this.handleRequest(request, env, ctx);
-        const contentLength = originalResponse.headers.get('content-length');
-        const responseSize = contentLength ? parseInt(contentLength) : 0;
-        
-        updateTrafficStats(request, responseSize);
+        const contentLength = originalResponse.headers.get("content-length");
+        let responseSize = contentLength ? parseInt(contentLength) : 0;
+
+        // Kalau tidak ada content-length, coba hitung isi response
+        if (!responseSize) {
+          try {
+            const body = await originalResponse.clone().text();
+            responseSize = new TextEncoder().encode(body).length;
+          } catch (_) {
+            responseSize = 0;
+          }
+        }
+
+        // ✅ perbaikan: sertakan env + ctx.waitUntil
+        ctx.waitUntil(updateTrafficStats(request, responseSize, env));
+
         return originalResponse;
       }
 
@@ -2040,7 +2068,6 @@ export default {
     const url = new URL(request.url);
     const pathname = url.pathname;
     const upgradeHeader = request.headers.get("Upgrade");
-    const prxList = await getPrxList();
     if (upgradeHeader === "websocket") {
         const prxMatch = url.pathname.match(/^\/(.+[:=-]\d+)$/);
 
@@ -2054,18 +2081,26 @@ export default {
           return await websocketHandler(request);
         }
       }
+      
+    // CORS preflight
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: CORS_HEADER_OPTIONS });
+    }
 
-    // Root -> UI (exact UI from worker 4)
+    // Root -> UI
     if (pathname === "/") {
       return serveUI();
     }
-    
-    // Traffic stats endpoint
+
+    // Statistik
     if (pathname === "/traffic") {
-      return await serveTrafficStats(request);
+      return await serveTrafficStats(request, env);
+      return new Response(JSON.stringify(stats, null, 2), {
+        headers: { "Content-Type": "application/json" },
+      });
     }
-    
-    // route: /health?ip=1.2.3.4&port=443
+
+    // Health check
     if (pathname === "/health") {
       const ipPort = url.searchParams.get("ip");
       if (!ipPort) {
@@ -2074,7 +2109,6 @@ export default {
           headers: { "Content-Type": "application/json" },
         });
       }
-
       const [ip, port] = ipPort.split(":");
       const result = await checkPrxHealth(ip, port || "443");
       return new Response(JSON.stringify(result, null, 2), {
@@ -2083,24 +2117,43 @@ export default {
       });
     }
 
-  
-   
+
+
+    // Subscription
     if (pathname.startsWith("/sub")) {
       const params = Object.fromEntries(url.searchParams.entries());
       const out = await generateSubscription(params, request);
       return new Response(out, {
         status: 200,
-        headers: { "Content-Type": "application/json; charset=utf-8", ...CORS_HEADER_OPTIONS },
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          ...CORS_HEADER_OPTIONS,
+        },
       });
     }
 
-    // /ping used by UI
+    // Ping
     if (pathname === "/ping") {
       return servePing();
-    }   
+    }
+    
+    if (path.startsWith("/all-proxy")) {
+      const response = {
+        total: PROXY_SOURCE.length,
+        proxies: PROXY_SOURCE
+      };
 
-    // Default: simple reverse proxy
+      return new Response(JSON.stringify(response, null, 2), {
+        headers: { "content-type": "application/json; charset=utf-8" }
+      });
+    }
+
+
+    // WebSocket
+    
+
+    // Default reverse proxy
     const targetReversePrx = (env && env.REVERSE_PRX_TARGET) || "example.com";
-    return await reverseWeb(request, targetReversePrx);
-  }
+    return await reverseWeb(request, targetReversePrx, null, env, ctx);
+  },
 };
