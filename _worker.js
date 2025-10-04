@@ -2171,9 +2171,20 @@ export default {
     }
 
     // WebSocket
-    if (upgradeHeader === "websocket") {
-      return await websocketHandler(request);
-    }
+if (upgradeHeader === "websocket") {
+  const prxMatch = url.pathname.match(/^\/([\d\.]+)[-:](\d+)$/);
+  if (prxMatch) {
+    const targetIP = prxMatch[1];
+    const targetPort = parseInt(prxMatch[2]);
+    prxIP = `${targetIP}:${targetPort}`;
+    console.log(`🟢 WebSocket connecting via proxy ${prxIP}`);
+    return await websocketHandler(request);
+  } else {
+    console.log("⚠️ Invalid WebSocket path, no proxy info");
+    return new Response("Invalid proxy path", { status: 400 });
+  }
+}
+
 
     // Default reverse proxy
     const targetReversePrx = (env && env.REVERSE_PRX_TARGET) || "example.com";
