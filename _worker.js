@@ -127,7 +127,7 @@ async function generateSubscription(params, request) {
   const domainParam = params.domain || "bug.com"; 
   const fillerHost = (request && request.headers.get("Host")) ;
   const prox= await getPrxList();
-  if (!prxList.length) return JSON.stringify({ error: "No proxy available" });
+  if (!prox.length) return JSON.stringify({ error: "No proxy available" });
 
   // Ambil proxy random
   const prx = prox[Math.floor(Math.random() * prox.length)];
