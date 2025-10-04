@@ -133,61 +133,12 @@ const PROXY_SOURCE = [
 ];
 async function getPrxList() {
   const shuffled = [...PROXY_SOURCE];
-  shuffleArray(shuffled);
-  return shuffled[Math.floor(Math.random() * shuffled.length)];
-}
-
+  shuffleArray(shuffled);  
+  return shuffled[Math.floor(Math.random() * shuffled.length)]; // return 1 proxy random
+}   
    
    
-   
 
-/* =======================
-   HELPERS
-   ======================= */
-function shuffleArray(array) {
-  let currentIndex = array.length;
-  while (currentIndex !== 0) {
-    const randomIndex = Math.floor(Math.random() * currentIndex);
-    currentIndex--;
-    [array[currentIndex], array[randomIndex]] = [
-      array[randomIndex],
-      array[currentIndex],
-    ];
-  }
-  return array;
-}
-
-function arrayBufferToHex(buffer) {
-  return [...new Uint8Array(buffer)]
-    .map((x) => x.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-function base64ToArrayBuffer(base64Str) {
-  if (!base64Str) return { error: null };
-  try {
-    base64Str = base64Str.replace(/-/g, "+").replace(/_/g, "/");
-    const decode = atob(base64Str);
-    const arr = Uint8Array.from(decode, (c) => c.charCodeAt(0));
-    return { earlyData: arr.buffer, error: null };
-  } catch (error) {
-    return { error };
-  }
-}
-
-function safeCloseWebSocket(socket) {
-  try {
-    if (
-      socket &&
-      (socket.readyState === WS_READY_STATE_OPEN ||
-        socket.readyState === WS_READY_STATE_CLOSING)
-    ) {
-      socket.close();
-    }
-  } catch (error) {
-    console.error("safeCloseWebSocket error", error);
-  }
-}
 
 /* =======================
    PROXY / SUB GENERATOR (ROTATE ONE RANDOM CONFIG from SG+ID with TLS & NTLS)
@@ -199,10 +150,11 @@ async function generateSubscription(params, request) {
   // host filler otomatis dari request host
   const fillerHost = (request && request.headers.get("Host")) ;
   const prx = await getPrxList();
-   const uuid = crypto.randomUUID();
-
   if (!prx) return JSON.stringify({ error: "No proxy available" });
- 
+
+  // Ambil proxy random
+  const uuid = crypto.randomUUID();
+
   const config_vls = {
     [atob(flash)]: (() => {
       const uri = new URL(`${atob(flash)}://${domainParam}`);
@@ -233,39 +185,10 @@ async function generateSubscription(params, request) {
 /* =======================
    Reverse Web / Basic Proxy
    ======================= */
-async function reverseWeb(request, target, targetPath) {
-  const targetUrl = new URL(request.url);
-  const targetChunk = (target || "example.com").split(":");
-
-  targetUrl.hostname = targetChunk[0];
-  targetUrl.port = targetChunk[1]?.toString() || "443";
-  targetUrl.pathname = targetPath || targetUrl.pathname;
-
-  const modifiedRequest = new Request(targetUrl, request);
-  modifiedRequest.headers.set("X-Forwarded-Host", request.headers.get("Host") || "");
-  const response = await fetch(modifiedRequest);
-  const newResponse = new Response(response.body, response);
-  for (const [key, value] of Object.entries(CORS_HEADER_OPTIONS)) {
-    newResponse.headers.set(key, value);
-  }
-  newResponse.headers.set("X-Proxied-By", "Worker");
-  
-  // Update traffic stats untuk reverse proxy
-  const contentLength = response.headers.get('content-length');
-  const responseSize = contentLength ? parseInt(contentLength) : 0;
-  updateTrafficStats(request, responseSize);
-  
-  return newResponse;
-}
-
-/* =======================
-   WEBSOCKET HANDLER + TCP/UDP logic
-   (ported and adapted from original code)
-   ======================= */
-
 async function websocketHandler(request) {
   const webSocketPair = new WebSocketPair();
   const [client, webSocket] = Object.values(webSocketPair);
+
   webSocket.accept();
 
   let addressLog = "";
@@ -274,6 +197,7 @@ async function websocketHandler(request) {
     console.log(`[${addressLog}:${portLog}] ${info}`, event || "");
   };
   const earlyDataHeader = request.headers.get("sec-websocket-protocol") || "";
+
   const readableWebSocketStream = makeReadableWebSocketStream(webSocket, earlyDataHeader, log);
 
   let remoteSocketWrapper = {
@@ -284,7 +208,7 @@ async function websocketHandler(request) {
   readableWebSocketStream
     .pipeTo(
       new WritableStream({
-        async write(chunk) {
+        async write(chunk, controller) {
           if (isDNS) {
             return handleUDPOutbound(DNS_SERVER_ADDRESS, DNS_SERVER_PORT, chunk, webSocket, null, log);
           }
@@ -302,8 +226,10 @@ async function websocketHandler(request) {
             protocolHeader = readHorseHeader(chunk);
           } else if (protocol === atob(flash)) {
             protocolHeader = readFlashHeader(chunk);
-          } else {
+          } else if (protocol === "ss") {
             protocolHeader = readSsHeader(chunk);
+          } else {
+            throw new Error("Unknown Protocol!");
           }
 
           addressLog = protocolHeader.addressRemote;
@@ -317,7 +243,7 @@ async function websocketHandler(request) {
             if (protocolHeader.portRemote === 53) {
               isDNS = true;
             } else {
-              // UDP other than DNS is not supported in this worker
+              // return handleUDPOutbound(protocolHeader.addressRemote, protocolHeader.portRemote, chunk, webSocket, protocolHeader.version, log);
               throw new Error("UDP only support for DNS port 53");
             }
           }
@@ -374,7 +300,7 @@ async function protocolSniffer(buffer) {
   }
 
   const flashDelimiter = new Uint8Array(buffer.slice(1, 17));
-  // check uuid v4 pattern
+  // Hanya mendukung UUID v4
   if (arrayBufferToHex(flashDelimiter).match(/^[0-9a-f]{8}[0-9a-f]{4}4[0-9a-f]{3}[89ab][0-9a-f]{3}[0-9a-f]{12}$/i)) {
     return atob(flash);
   }
@@ -382,8 +308,135 @@ async function protocolSniffer(buffer) {
   return "ss"; // default
 }
 
+async function handleTCPOutBound(
+  remoteSocket,
+  addressRemote,
+  portRemote,
+  rawClientData,
+  webSocket,
+  responseHeader,
+  log
+) {
+  async function connectAndWrite(address, port) {
+    const tcpSocket = connect({
+      hostname: address,
+      port: port,
+    });
+    remoteSocket.value = tcpSocket;
+    log(`connected to ${address}:${port}`);
+    const writer = tcpSocket.writable.getWriter();
+    await writer.write(rawClientData);
+    writer.releaseLock();
+
+    return tcpSocket;
+  }
+
+  async function retry() {
+    const tcpSocket = await connectAndWrite(
+      prxIP.split(/[:=-]/)[0] || addressRemote,
+      prxIP.split(/[:=-]/)[1] || portRemote
+    );
+    tcpSocket.closed
+      .catch((error) => {
+        console.log("retry tcpSocket closed error", error);
+      })
+      .finally(() => {
+        safeCloseWebSocket(webSocket);
+      });
+    remoteSocketToWS(tcpSocket, webSocket, responseHeader, retry, log);
+  }
+
+  const tcpSocket = await connectAndWrite(addressRemote, portRemote);
+
+  remoteSocketToWS(tcpSocket, webSocket, responseHeader, retry, log);
+}
+
+async function handleUDPOutbound(targetAddress, targetPort, udpChunk, webSocket, responseHeader, log) {
+  try {
+    let protocolHeader = responseHeader;
+    const tcpSocket = connect({
+      hostname: targetAddress,
+      port: targetPort,
+    });
+
+    log(`Connected to ${targetAddress}:${targetPort}`);
+
+    const writer = tcpSocket.writable.getWriter();
+    await writer.write(udpChunk);
+    writer.releaseLock();
+
+    await tcpSocket.readable.pipeTo(
+      new WritableStream({
+        async write(chunk) {
+          if (webSocket.readyState === WS_READY_STATE_OPEN) {
+            if (protocolHeader) {
+              webSocket.send(await new Blob([protocolHeader, chunk]).arrayBuffer());
+              protocolHeader = null;
+            } else {
+              webSocket.send(chunk);
+            }
+          }
+        },
+        close() {
+          log(`UDP connection to ${targetAddress} closed`);
+        },
+        abort(reason) {
+          console.error(`UDP connection to ${targetPort} aborted due to ${reason}`);
+        },
+      })
+    );
+  } catch (e) {
+    console.error(`Error while handling UDP outbound, error ${e.message}`);
+  }
+}
+
+function makeReadableWebSocketStream(webSocketServer, earlyDataHeader, log) {
+  let readableStreamCancel = false;
+  const stream = new ReadableStream({
+    start(controller) {
+      webSocketServer.addEventListener("message", (event) => {
+        if (readableStreamCancel) {
+          return;
+        }
+        const message = event.data;
+        controller.enqueue(message);
+      });
+      webSocketServer.addEventListener("close", () => {
+        safeCloseWebSocket(webSocketServer);
+        if (readableStreamCancel) {
+          return;
+        }
+        controller.close();
+      });
+      webSocketServer.addEventListener("error", (err) => {
+        log("webSocketServer has error");
+        controller.error(err);
+      });
+      const { earlyData, error } = base64ToArrayBuffer(earlyDataHeader);
+      if (error) {
+        controller.error(error);
+      } else if (earlyData) {
+        controller.enqueue(earlyData);
+      }
+    },
+
+    pull(controller) {},
+    cancel(reason) {
+      if (readableStreamCancel) {
+        return;
+      }
+      log(`ReadableStream was canceled, due to ${reason}`);
+      readableStreamCancel = true;
+      safeCloseWebSocket(webSocketServer);
+    },
+  });
+
+  return stream;
+}
+
 function readSsHeader(ssBuffer) {
   const view = new DataView(ssBuffer);
+
   const addressType = view.getUint8(0);
   let addressLength = 0;
   let addressValueIndex = 1;
@@ -442,11 +495,11 @@ function readFlashHeader(buffer) {
   let isUDP = false;
 
   const optLength = new Uint8Array(buffer.slice(17, 18))[0];
+
   const cmd = new Uint8Array(buffer.slice(18 + optLength, 18 + optLength + 1))[0];
   if (cmd === 1) {
-    // TCP
   } else if (cmd === 2) {
-    isDNS = true;
+    isUDP = true;
   } else {
     return {
       hasError: true,
@@ -459,22 +512,22 @@ function readFlashHeader(buffer) {
 
   let addressIndex = portIndex + 2;
   const addressBuffer = new Uint8Array(buffer.slice(addressIndex, addressIndex + 1));
+
   const addressType = addressBuffer[0];
   let addressLength = 0;
   let addressValueIndex = addressIndex + 1;
   let addressValue = "";
-
   switch (addressType) {
-    case 1:
+    case 1: // For IPv4
       addressLength = 4;
       addressValue = new Uint8Array(buffer.slice(addressValueIndex, addressValueIndex + addressLength)).join(".");
       break;
-    case 2:
+    case 2: // For Domain
       addressLength = new Uint8Array(buffer.slice(addressValueIndex, addressValueIndex + 1))[0];
       addressValueIndex += 1;
       addressValue = new TextDecoder().decode(buffer.slice(addressValueIndex, addressValueIndex + addressLength));
       break;
-    case 3:
+    case 3: // For IPv6
       addressLength = 16;
       const dataView = new DataView(buffer.slice(addressValueIndex, addressValueIndex + addressLength));
       const ipv6 = [];
@@ -486,7 +539,7 @@ function readFlashHeader(buffer) {
     default:
       return {
         hasError: true,
-        message: `invalid  addressType is ${addressType}`,
+        message: `invild  addressType is ${addressType}`,
       };
   }
   if (!addressValue) {
@@ -531,16 +584,16 @@ function readHorseHeader(buffer) {
   let addressValueIndex = 2;
   let addressValue = "";
   switch (addressType) {
-    case 1:
+    case 1: // For IPv4
       addressLength = 4;
       addressValue = new Uint8Array(dataBuffer.slice(addressValueIndex, addressValueIndex + addressLength)).join(".");
       break;
-    case 3:
+    case 3: // For Domain
       addressLength = new Uint8Array(dataBuffer.slice(addressValueIndex, addressValueIndex + 1))[0];
       addressValueIndex += 1;
       addressValue = new TextDecoder().decode(dataBuffer.slice(addressValueIndex, addressValueIndex + addressLength));
       break;
-    case 4:
+    case 4: // For IPv6
       addressLength = 16;
       const dataView = new DataView(dataBuffer.slice(addressValueIndex, addressValueIndex + addressLength));
       const ipv6 = [];
@@ -576,88 +629,6 @@ function readHorseHeader(buffer) {
     version: null,
     isUDP: isUDP,
   };
-}
-
-async function handleTCPOutBound(
-  remoteSocket,
-  addressRemote,
-  portRemote,
-  rawClientData,
-  webSocket,
-  responseHeader,
-  log
-) {
-  async function connectAndWrite(address, port) {
-    const tcpSocket = connect({
-      hostname: address,
-      port: port,
-    });
-    remoteSocket.value = tcpSocket;
-    log(`connected to ${address}:${port}`);
-    const writer = tcpSocket.writable.getWriter();
-    await writer.write(rawClientData);
-    writer.releaseLock();
-
-    return tcpSocket;
-  }
-
-  async function retry() {
-    const tcpSocket = await connectAndWrite(
-      (addressRemote || "").split(/[:=-]/)[0] || addressRemote,
-      (addressRemote || "").split(/[:=-]/)[1] || portRemote
-    );
-    tcpSocket.closed
-      .catch((error) => {
-        console.log("retry tcpSocket closed error", error);
-      })
-      .finally(() => {
-        safeCloseWebSocket(webSocket);
-      });
-    remoteSocketToWS(tcpSocket, webSocket, responseHeader, retry, log);
-  }
-
-  const tcpSocket = await connectAndWrite(addressRemote, portRemote);
-
-  remoteSocketToWS(tcpSocket, webSocket, responseHeader, retry, log);
-}
-
-async function handleUDPOutbound(targetAddress, targetPort, udpChunk, webSocket, responseHeader, log) {
-  try {
-    let protocolHeader = responseHeader;
-    const tcpSocket = connect({
-      hostname: targetAddress,
-      port: targetPort,
-    });
-
-    log(`Connected to ${targetAddress}:${targetPort}`);
-
-    const writer = tcpSocket.writable.getWriter();
-    await writer.write(udpChunk);
-    writer.releaseLock();
-
-    await tcpSocket.readable.pipeTo(
-      new WritableStream({
-        async write(chunk) {
-          if (webSocket.readyState === WS_READY_STATE_OPEN) {
-            if (protocolHeader) {
-              webSocket.send(await new Blob([protocolHeader, chunk]).arrayBuffer());
-              protocolHeader = null;
-            } else {
-              webSocket.send(chunk);
-            }
-          }
-        },
-        close() {
-          log(`UDP connection to ${targetAddress} closed`);
-        },
-        abort(reason) {
-          console.error(`UDP connection to ${targetPort} aborted due to ${reason}`);
-        },
-      })
-    );
-  } catch (e) {
-    console.error(`Error while handling UDP outbound, error ${e.message}`);
-  }
 }
 
 async function remoteSocketToWS(remoteSocket, webSocket, responseHeader, retry, log) {
@@ -697,49 +668,55 @@ async function remoteSocketToWS(remoteSocket, webSocket, responseHeader, retry, 
   }
 }
 
-function makeReadableWebSocketStream(webSocketServer, earlyDataHeader, log) {
-  let readableStreamCancel = false;
-  const stream = new ReadableStream({
-    start(controller) {
-      webSocketServer.addEventListener("message", (event) => {
-        if (readableStreamCancel) {
-          return;
-        }
-        const message = event.data;
-        controller.enqueue(message);
-      });
-      webSocketServer.addEventListener("close", () => {
-        safeCloseWebSocket(webSocketServer);
-        if (readableStreamCancel) {
-          return;
-        }
-        controller.close();
-      });
-      webSocketServer.addEventListener("error", (err) => {
-        log("webSocketServer has error");
-        controller.error(err);
-      });
-      const { earlyData, error } = base64ToArrayBuffer(earlyDataHeader);
-      if (error) {
-        controller.error(error);
-      } else if (earlyData) {
-        controller.enqueue(earlyData);
-      }
-    },
-
-    pull(controller) {},
-    cancel(reason) {
-      if (readableStreamCancel) {
-        return;
-      }
-      log(`ReadableStream was canceled, due to ${reason}`);
-      readableStreamCancel = true;
-      safeCloseWebSocket(webSocketServer);
-    },
-  });
-
-  return stream;
+function safeCloseWebSocket(socket) {
+  try {
+    if (socket.readyState === WS_READY_STATE_OPEN || socket.readyState === WS_READY_STATE_CLOSING) {
+      socket.close();
+    }
+  } catch (error) {
+    console.error("safeCloseWebSocket error", error);
+  }
 }
+
+async function checkPrxHealth(prxIP, prxPort) {
+  const req = await fetch(`${PRX_HEALTH_CHECK_API}?ip=${prxIP}:${prxPort}`);
+  return await req.json();
+}
+
+// Helpers
+function base64ToArrayBuffer(base64Str) {
+  if (!base64Str) {
+    return { error: null };
+  }
+  try {
+    base64Str = base64Str.replace(/-/g, "+").replace(/_/g, "/");
+    const decode = atob(base64Str);
+    const arryBuffer = Uint8Array.from(decode, (c) => c.charCodeAt(0));
+    return { earlyData: arryBuffer.buffer, error: null };
+  } catch (error) {
+    return { error };
+  }
+}
+
+function arrayBufferToHex(buffer) {
+  return [...new Uint8Array(buffer)].map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+function shuffleArray(array) {
+  let currentIndex = array.length;
+
+  // While there remain elements to shuffle...
+  while (currentIndex != 0) {
+    // Pick a remaining element...
+    let randomIndex = Math.floor(Math.random() * currentIndex);
+    currentIndex--;
+
+    // And swap it with the current element.
+    [array[currentIndex], array[randomIndex]] = [array[randomIndex], array[currentIndex]];
+  }
+}
+
+
 
 
 async function checkPrxHealth(prxIP, prxPort) {
@@ -2020,34 +1997,6 @@ async function servePing() {
   });
 }
 
-/* =======================
-   ALL PROXY ENDPOINT
-   ======================= */
-async function serveAllProxy() {
-  // ambil daftar proxy dari PROXY_SOURCE
-  const list = PROXY_SOURCE.map((p, i) => ({
-    id: i + 1,
-    ip: p.prxIP,
-    port: p.prxPort,
-    country: p.country,
-    org: p.org
-  }));
-
-  const result = {
-    total: list.length,
-    proxies: list
-  };
-
-  return new Response(JSON.stringify(result, null, 2), {
-    status: 200,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      ...CORS_HEADER_OPTIONS
-    }
-  });
-}
-
-
 
 /* =======================
    MAIN WORKER HANDLER
@@ -2096,7 +2045,19 @@ export default {
     const pathname = url.pathname;
     const prxList = await getPrxList();
     const upgradeHeader = request.headers.get("Upgrade");
-    
+    if (upgradeHeader === "websocket") {
+        const prxMatch = url.pathname.match(/^\/(.+[:=-]\d+)$/);
+
+        if (url.pathname.length == 3 || url.pathname.match(",")) {
+          const picked = prxList[Math.floor(Math.random() * prxList.length)];
+          prxIP = `${picked.prxIP}:${picked.prxPort}`;
+
+          return await websocketHandler(request);
+        } else if (prxMatch) {
+          prxIP = prxMatch[1];
+          return await websocketHandler(request);
+        }
+      }
       
     // CORS preflight
     if (request.method === "OPTIONS") {
@@ -2152,20 +2113,8 @@ export default {
     if (pathname === "/ping") {
       return servePing();
     }
-
-    if (pathname === "/allproxy") {
-      return serveAllProxy();
-    }
-
-    if (upgradeHeader === "websocket") {
-        
-          return await websocketHandler(request);
-        
-      }
     
-  
-
-
+   
 
     // Default reverse proxy
     const targetReversePrx = (env && env.REVERSE_PRX_TARGET) || "example.com";
