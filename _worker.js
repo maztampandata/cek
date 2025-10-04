@@ -2172,18 +2172,33 @@ export default {
 
     // WebSocket
 if (upgradeHeader === "websocket") {
-  const prxMatch = url.pathname.match(/^\/([\d\.]+)[-:](\d+)$/);
-  if (prxMatch) {
-    const targetIP = prxMatch[1];
-    const targetPort = parseInt(prxMatch[2]);
-    prxIP = `${targetIP}:${targetPort}`;
-    console.log(`🟢 WebSocket connecting via proxy ${prxIP}`);
+  const prxList = await getPrxList();
+  const prxMatch = url.pathname.match(/^\/(.+[:=-]\d+)$/);
+
+  // Jika path pendek (misal: /ws, /x, /2) atau path mengandung koma, fallback ke proxy acak
+  if (url.pathname.length == 3 || url.pathname.match(",")) {
+    const picked = prxList[Math.floor(Math.random() * prxList.length)];
+    prxIP = `${picked.prxIP}:${picked.prxPort}`;
+    console.log(`🟢 Random proxy used for websocket: ${prxIP}`);
     return await websocketHandler(request);
-  } else {
-    console.log("⚠️ Invalid WebSocket path, no proxy info");
-    return new Response("Invalid proxy path", { status: 400 });
+  }
+
+  // Jika path berisi IP:PORT atau IP-PORT (misal /103.6.207.108-8080)
+  else if (prxMatch) {
+    prxIP = prxMatch[1];
+    console.log(`🟢 Using proxy from path: ${prxIP}`);
+    return await websocketHandler(request);
+  }
+
+  // Fallback jika tidak ada path cocok
+  else {
+    const picked = prxList[Math.floor(Math.random() * prxList.length)];
+    prxIP = `${picked.prxIP}:${picked.prxPort}`;
+    console.log(`🔁 Fallback to random proxy: ${prxIP}`);
+    return await websocketHandler(request);
   }
 }
+
 
 
     // Default reverse proxy
