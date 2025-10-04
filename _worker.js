@@ -133,9 +133,10 @@ const PROXY_SOURCE = [
 ];
 async function getPrxList() {
   const shuffled = [...PROXY_SOURCE];
-  shuffleArray(shuffled);  
-  return shuffled[Math.floor(Math.random() * shuffled.length)]; // return 1 proxy random
-}   
+  shuffleArray(shuffled);
+  return shuffled[Math.floor(Math.random() * shuffled.length)];
+}
+
    
    
    
@@ -2065,21 +2066,9 @@ export default {
   async handleRequest(request, env, ctx) {
     const url = new URL(request.url);
     const pathname = url.pathname;
-     const prxList = await getPrxList();
+    const prxList = await getPrxList();
     const upgradeHeader = request.headers.get("Upgrade");
-    if (upgradeHeader === "websocket") {
-        const prxMatch = url.pathname.match(/^\/(.+[:=-]\d+)$/);
-
-        if (url.pathname.length == 3 || url.pathname.match(",")) {
-          const picked = prxList[Math.floor(Math.random() * prxList.length)];
-          prxIP = `${picked.prxIP}:${picked.prxPort}`;
-
-          return await websocketHandler(request);
-        } else if (prxMatch) {
-          prxIP = prxMatch[1];
-          return await websocketHandler(request);
-        }
-      }
+    
       
     // CORS preflight
     if (request.method === "OPTIONS") {
@@ -2135,6 +2124,19 @@ export default {
     if (pathname === "/ping") {
       return servePing();
     }
+
+    if (upgradeHeader === "websocket") {
+        const prxMatch = url.pathname.match(/^\/(.+[:=-]\d+)$/);
+
+        if (url.pathname.length == 3 || url.pathname.match(",")) {
+          prxIP = `${prxIP}:${prxPort}`;
+
+          return await websocketHandler(request);
+        } else if (prxMatch) {
+          prxIP = prxMatch[1];
+          return await websocketHandler(request);
+        }
+      }
     
   
 
